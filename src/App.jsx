@@ -1,25 +1,64 @@
 import { useState, useEffect, useCallback } from "react";
 
-// ── Supabase config ───────────────────────────────────────────────────────────
-const SB_URL = "https://ybjivemwjiqqykzmyhoe.supabase.co";
-const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inliaml2ZW13amlxcXlrem15aG9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMjY5ODEsImV4cCI6MjA5MzgwMjk4MX0.TTF4NH-Rq5lk2DD0Yo7DUCQ_miUf3I9TBpORkJ8E3sM";
-const PS = 25; // page size
+const SB_URL = import.meta.env.VITE_SUPABASE_URL;
+const SB_KEY = import.meta.env.VITE_SUPABASE_KEY;
+const SB_SVC = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
+const RS_KEY = import.meta.env.VITE_RESEND_KEY;
+const PS = 25;
 
-// ── API layer ─────────────────────────────────────────────────────────────────
-async function sb(path, { method="GET", body, prefer, token }={}) {
-  const h = { "Content-Type":"application/json", "apikey":SB_KEY, "Authorization":`Bearer ${token||SB_KEY}` };
+// ── API ───────────────────────────────────────────────────────────────────────
+async function sb(path, { method="GET", body, prefer, token, svc }={}) {
+  const key = svc ? SB_SVC : SB_KEY;
+  const tok = svc ? SB_SVC : (token || SB_KEY);
+  const h = { "Content-Type":"application/json", "apikey":key, "Authorization":`Bearer ${tok}` };
   if (prefer) h["Prefer"] = prefer;
   const r = await fetch(`${SB_URL}${path}`, { method, headers:h, body:body!=null?JSON.stringify(body):undefined });
   if (r.status===204) return null;
   const d = await r.json();
-  if (!r.ok) throw new Error(d.message||d.error_description||d.error||"Errore API");
+  if (!r.ok) throw new Error(d.message||d.error_description||d.error||`Errore ${r.status}`);
   return d;
 }
-const GET  = (t,qs,tok)    => sb(`/rest/v1/${t}?${qs||""}`,{token:tok});
-const POST = (t,b,tok)     => sb(`/rest/v1/${t}`,{method:"POST",body:b,prefer:"return=representation",token:tok});
-const PATCH= (t,qs,b,tok)  => sb(`/rest/v1/${t}?${qs}`,{method:"PATCH",body:b,prefer:"return=representation",token:tok});
-const DEL  = (t,qs,tok)    => sb(`/rest/v1/${t}?${qs}`,{method:"DELETE",token:tok});
-const UPS  = (t,b,tok)     => sb(`/rest/v1/${t}`,{method:"POST",body:b,prefer:"return=representation,resolution=merge-duplicates",token:tok});
+const GET  = (t,qs,tok)   => sb(`/rest/v1/${t}?${qs||""}`,{token:tok});
+const POST = (t,b,tok)    => sb(`/rest/v1/${t}`,{method:"POST",body:b,prefer:"return=representation",token:tok});
+const PATCH= (t,qs,b,tok) => sb(`/rest/v1/${t}?${qs}`,{method:"PATCH",body:b,prefer:"return=representation",token:tok});
+const DEL  = (t,qs,tok)   => sb(`/rest/v1/${t}?${qs}`,{method:"DELETE",token:tok});
+const UPS  = (t,b,tok)    => sb(`/rest/v1/${t}`,{method:"POST",body:b,prefer:"return=representation,resolution=merge-duplicates",token:tok});
+
+// Crea utente tramite Admin API (service_role) — funziona con e senza email
+async function createAuthUser(email, password) {
+  const realEmail = email || `noemail_${Date.now()}_${Math.random().toString(36).slice(2)}@noemail.local`;
+  const d = await sb("/auth/v1/admin/users", {
+    method:"POST",
+    body:{ email:realEmail, password, email_confirm:true },
+    svc:true
+  });
+  return { id:d.id, email:realEmail, hasRealEmail:!!email };
+}
+
+// Invia email di benvenuto tramite Resend
+async function sendWelcomeEmail(email, nome, password, condoNome) {
+  await fetch("https://api.resend.com/emails", {
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${RS_KEY}`},
+    body:JSON.stringify({
+      from:"Portale Condominiale <portale@studiomazzinibo.com>",
+      to:[email],
+      subject:"Le tue credenziali di accesso al Portale Condominiale",
+      html:`<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+        <h2 style="color:#1e40af">Studio Amministrazioni Immobiliari<br>s.a.s. di Mazzini & C.</h2>
+        <p>Gentile <strong>${nome}</strong>,</p>
+        <p>Le sue credenziali per accedere al Portale Condominiale <strong>${condoNome}</strong> sono:</p>
+        <div style="background:#f1f5f9;padding:16px;border-radius:8px;margin:16px 0">
+          <p style="margin:4px 0">🌐 <strong>Portale:</strong> <a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>
+          <p style="margin:4px 0">📧 <strong>Email:</strong> ${email}</p>
+          <p style="margin:4px 0">🔑 <strong>Password:</strong> ${password}</p>
+        </div>
+        <p>Si consiglia di cambiare la password al primo accesso.</p>
+        <p style="color:#64748b;font-size:12px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</p>
+      </div>`
+    })
+  });
+}
 
 // ── UI Primitives ─────────────────────────────────────────────────────────────
 const Inp = ({label,hint,...p}) => (
@@ -63,6 +102,12 @@ const SearchBar = ({value,onChange,placeholder}) => (
     <input className="w-full border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
   </div>
 );
+function useData(fn, deps=[]) {
+  const [data,setData]=useState(null); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
+  const load = useCallback(async()=>{ setLoading(true); setErr(""); try{setData(await fn());}catch(e){setErr(e.message);} setLoading(false); },deps);
+  useEffect(()=>{load();},[load]);
+  return {data,loading,err,reload:load};
+}
 
 // ── Contact Footer ────────────────────────────────────────────────────────────
 function ContactFooter({c}) {
@@ -74,8 +119,8 @@ function ContactFooter({c}) {
         <span className="text-xs font-semibold text-gray-700">{c.nome}</span>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-1">
-        {c.telefono  && <a href={`tel:${c.telefono}`}     className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition">📞 {c.telefono}</a>}
-        {c.email     && <a href={`mailto:${c.email}`}     className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition">✉️ {c.email}</a>}
+        {c.telefono  && <a href={`tel:${c.telefono}`}   className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition">📞 {c.telefono}</a>}
+        {c.email     && <a href={`mailto:${c.email}`}   className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition">✉️ {c.email}</a>}
         {c.indirizzo && <span className="flex items-center gap-1 text-xs text-gray-400">📍 {c.indirizzo}</span>}
         {c.orari     && <span className="flex items-center gap-1 text-xs text-gray-400">🕐 {c.orari}</span>}
       </div>
@@ -113,15 +158,15 @@ function Sidebar({items,active,onSelect,user,onLogout}) {
 // ── Login ─────────────────────────────────────────────────────────────────────
 function Login({onLogin}) {
   const [email,setEmail]=useState(""); const [pwd,setPwd]=useState(""); const [err,setErr]=useState(""); const [loading,setLoading]=useState(false); const [show,setShow]=useState(false);
-  const submit = async () => {
-    if (!email||!pwd) return;
+  const submit = async() => {
+    if(!email||!pwd) return;
     setLoading(true); setErr("");
     try {
       const auth = await sb("/auth/v1/token?grant_type=password",{method:"POST",body:{email,password:pwd}});
       const profiles = await GET("profiles",`id=eq.${auth.user.id}&select=*,condominii(*)`,auth.access_token);
-      if (!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
-      onLogin({ token:auth.access_token, ...profiles[0], email:auth.user.email });
-    } catch(e) { setErr(e.message); }
+      if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
+      onLogin({token:auth.access_token,...profiles[0],email:auth.user.email});
+    } catch(e){setErr(e.message);}
     setLoading(false);
   };
   return (
@@ -137,7 +182,7 @@ function Login({onLogin}) {
           <div className="relative mb-3">
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Password</label>
             <input type={show?"text":"password"} value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="••••••••"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 pr-20"/>
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition pr-20"/>
             <button type="button" onClick={()=>setShow(v=>!v)} className="absolute right-3 top-7 text-gray-400 text-xs">{show?"Nascondi":"Mostra"}</button>
           </div>
           <ErrBox msg={err}/>
@@ -149,262 +194,29 @@ function Login({onLogin}) {
   );
 }
 
-// ── Import Excel ──────────────────────────────────────────────────────────────
-function AdminImport({tok}) {
-  const {data:condominii} = useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
-  const [selCond,setSelCond]=useState("");
-  const [rows,setRows]=useState([]);
-  const [preview,setPreview]=useState(false);
-  const [importing,setImporting]=useState(false);
-  const [results,setResults]=useState(null);
-  const [err,setErr]=useState("");
-
-  useEffect(()=>{ if(condominii?.length && !selCond) setSelCond(String(condominii[0].id)); },[condominii]);
-
-  const parseExcel = async(file) => {
-    setErr(""); setRows([]); setPreview(false); setResults(null);
-    try {
-      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws, {defval:""});
-      
-      // Filtra solo proprietari
-      const proprietari = data.filter(r => {
-        const tipo = String(r["Tipo Cond."]||r["Tipo cond."]||r["TIPO COND."]||"").trim().toLowerCase();
-        return tipo === "proprietario";
-      });
-
-      // Per ogni proprietario, trova i suoi inquilini
-      const parsed = proprietari.map(r => {
-        const nUn = r["N. Un."] || r["N.Un."] || r["N Un"] || "";
-        const inquilini = data.filter(i => {
-          const tipoI = String(i["Tipo Cond."]||i["Tipo cond."]||"").trim().toLowerCase();
-          const nUnI = i["N. Un."] || i["N.Un."] || i["N Un"] || "";
-          return tipoI === "inquilino" && String(nUnI) === String(nUn);
-        }).map(i => ({
-          nome: String(i["Nome"]||"").trim(),
-          email: String(i["Email"]||i["EMAIL"]||"").trim(),
-          tel: String(i["Telefono"]||i["TELEFONO"]||"").trim(),
-        }));
-
-        const nomeCompleto = String(r["Nome"]||r["NOME"]||"").trim();
-        const primoToken = nomeCompleto.split(/\s+/)[0] || "Utente";
-        const cognome = primoToken.charAt(0).toUpperCase() + primoToken.slice(1).toLowerCase();
-        const mese = String(new Date().getMonth()+1).padStart(2,"0");
-        const password = `${cognome}${mese}!`;
-
-        return {
-          nome: nomeCompleto,
-          email: String(r["Email"]||r["EMAIL"]||r["email"]||"").trim(),
-          password,
-          interno: String(r["Interno"]||r["INTERNO"]||"").trim(),
-          civico: String(r["Civico"]||r["CIVICO"]||"").trim(),
-          via: String(r["Via"]||r["VIA"]||"").trim(),
-          foglio: String(r["Foglio"]||r["FOGLIO"]||"").trim(),
-          particella: String(r["Mappale"]||r["MAPPALE"]||"").trim(),
-          subalterno: String(r["Sub"]||r["SUB"]||"").trim(),
-          inquilini,
-        };
-      });
-
-      setRows(parsed); setPreview(true);
-    } catch(e) { setErr("Errore nella lettura del file: "+e.message); }
-  };
-
-  const doImport = async() => {
-    if (!selCond) { setErr("Seleziona un condominio."); return; }
-    setImporting(true); setErr("");
-    const ok=[], noEmail=[], failed=[];
-
-    for (const r of rows) {
-      try {
-        // Crea utente auth
-        let uid;
-        if (r.email) {
-          // Con email: usa signup normale
-          const auth = await sb("/auth/v1/signup",{method:"POST",body:{email:r.email,password:r.password}});
-          uid = auth.user?.id || auth.id;
-        } else {
-          // Senza email: usa Admin API con service_role key
-          const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
-          const res = await fetch(`${SB_URL}/auth/v1/admin/users`,{
-            method:"POST",
-            headers:{"Content-Type":"application/json","apikey":serviceKey,"Authorization":`Bearer ${serviceKey}`},
-            body:JSON.stringify({password:r.password,email_confirm:true,user_metadata:{name:r.nome}}),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.message||data.error||"Errore creazione utente");
-          uid = data.id;
-        }
-        if (!uid) throw new Error("UID non trovato");
-
-        // Inserisci profilo
-        await POST("profiles",{id:uid,name:r.nome,role:"condomino",cond_id:Number(selCond),scala:r.civico,interno:r.interno},tok);
-
-        // Inserisci dati catastali
-        if (r.foglio||r.particella||r.subalterno) {
-          await UPS("catastali",{user_id:uid,foglio:r.foglio,particella:r.particella,subalterno:r.subalterno,updated_at:new Date().toISOString()},tok);
-        }
-
-        // Inserisci inquilini
-        for (const inq of r.inquilini) {
-          if (inq.nome) await POST("inquilini",{user_id:uid,nome:inq.nome,email:inq.email,tel:inq.tel},tok);
-        }
-
-        // Invia email se presente
-        if (r.email) {
-          const condo = condominii?.find(c=>String(c.id)===String(selCond));
-          await fetch("https://api.resend.com/emails",{
-            method:"POST",
-            headers:{"Content-Type":"application/json","Authorization":`Bearer ${import.meta.env.VITE_RESEND_KEY}`},
-            body:JSON.stringify({
-              from:"Portale Condominiale <portale@studiomazzinibo.com>",
-              to:[r.email],
-              subject:"Le tue credenziali di accesso al Portale Condominiale",
-              html:`<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
-                <h2 style="color:#1e40af">Studio Amministrazioni Immobiliari<br>s.a.s. di Mazzini & C.</h2>
-                <p>Gentile <strong>${r.nome}</strong>,</p>
-                <p>Le sue credenziali per accedere al Portale Condominiale <strong>${condo?.nome||""}</strong> sono:</p>
-                <div style="background:#f1f5f9;padding:16px;border-radius:8px;margin:16px 0">
-                  <p style="margin:4px 0">🌐 <strong>Portale:</strong> <a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>
-                  <p style="margin:4px 0">📧 <strong>Email:</strong> ${r.email}</p>
-                  <p style="margin:4px 0">🔑 <strong>Password:</strong> ${r.password}</p>
-                </div>
-                <p>Si consiglia di cambiare la password al primo accesso.</p>
-                <p style="color:#64748b;font-size:12px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</p>
-              </div>`
-            })
-          });
-          ok.push(r);
-        } else {
-          noEmail.push(r);
-        }
-      } catch(e) { failed.push({...r, errore:e.message}); }
-    }
-
-    setResults({ok, noEmail, failed}); setImporting(false);
-  };
-
-  // Stampa riepilogo
-  const stampa = () => {
-    const condo = condominii?.find(c=>String(c.id)===String(selCond));
-    const tutti = [...(results?.ok||[]), ...(results?.noEmail||[])];
-    const html = `<html><head><title>Credenziali Portale</title>
-    <style>body{font-family:sans-serif;padding:20px} h1{color:#1e40af} table{width:100%;border-collapse:collapse;margin-top:20px} th,td{border:1px solid #ccc;padding:8px;text-align:left} th{background:#f1f5f9} @media print{button{display:none}}</style>
-    </head><body>
-    <h1>Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</h1>
-    <h2>Credenziali di accesso — ${condo?.nome||""}</h2>
-    <p>Data: ${new Date().toLocaleDateString("it-IT")} &nbsp;|&nbsp; Portale: <strong>studiomazzinibo.com</strong></p>
-    <table><tr><th>Nome</th><th>Interno</th><th>Email</th><th>Password</th></tr>
-    ${tutti.map(r=>`<tr><td>${r.nome}</td><td>${r.interno}</td><td>${r.email||"—"}</td><td>${r.password}</td></tr>`).join("")}
-    </table>
-    <br><button onclick="window.print()">🖨️ Stampa</button>
-    </body></html>`;
-    const w = window.open("","_blank");
-    w.document.write(html); w.document.close();
-  };
-
-  return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-black text-gray-800">Importazione da Excel</h2>
-        <p className="text-gray-400 text-sm mt-0.5">Carica il file Excel per importare i condomini in blocco.</p>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
-        <Sel label="Condominio di destinazione" value={selCond} onChange={e=>setSelCond(e.target.value)}>
-          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
-        </Sel>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">File Excel (.xlsx)</label>
-        <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])}
-          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
-      </div>
-
-      <ErrBox msg={err}/>
-
-      {preview && rows.length>0 && !results && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-5">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <div>
-              <p className="font-bold text-gray-800">Anteprima importazione</p>
-              <p className="text-xs text-gray-400 mt-0.5">{rows.length} proprietari trovati · {rows.filter(r=>!r.email).length} senza email</p>
-            </div>
-            <Btn onClick={doImport} disabled={importing}>{importing?"Importazione in corso...":"Importa tutti"}</Btn>
-          </div>
-          <div className="max-h-64 overflow-y-auto">
-            {rows.map((r,i)=>(
-              <div key={i} className={`flex items-center justify-between px-5 py-3 ${i<rows.length-1?"border-b border-gray-50":""}`}>
-                <div>
-                  <p className="font-medium text-gray-800 text-sm">{r.nome}</p>
-                  <p className="text-xs text-gray-400">Int. {r.interno} · {r.email||<span className="text-amber-500">nessuna email</span>}</p>
-                </div>
-                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{r.password}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {results && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h3 className="font-bold text-gray-800 mb-4">Risultati importazione</h3>
-          <div className="grid grid-cols-3 gap-4 mb-5">
-            <div className="bg-emerald-50 rounded-xl p-4 text-center">
-              <p className="text-2xl font-black text-emerald-600">{results.ok.length}</p>
-              <p className="text-xs text-emerald-600 font-medium">Importati con email</p>
-            </div>
-            <div className="bg-amber-50 rounded-xl p-4 text-center">
-              <p className="text-2xl font-black text-amber-600">{results.noEmail.length}</p>
-              <p className="text-xs text-amber-600 font-medium">Senza email</p>
-            </div>
-            <div className="bg-red-50 rounded-xl p-4 text-center">
-              <p className="text-2xl font-black text-red-600">{results.failed.length}</p>
-              <p className="text-xs text-red-600 font-medium">Errori</p>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <Btn variant="success" onClick={stampa}>🖨️ Stampa riepilogo credenziali</Btn>
-            <Btn variant="secondary" onClick={()=>{setResults(null);setRows([]);setPreview(false);}}>Nuova importazione</Btn>
-          </div>
-          {results.failed.length>0 && (
-            <div className="mt-4 bg-red-50 rounded-xl p-4">
-              <p className="text-xs font-semibold text-red-600 mb-2">Righe con errore:</p>
-              {results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">{r.nome}: {r.errore}</p>)}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Admin ─────────────────────────────────────────────────────────────────────
 function AdminPanel({user,onLogout,view,setView}) {
-  const nav=[{id:"condominii",label:"Condomìni",icon:"🏢"},{id:"utenti",label:"Utenti",icon:"👥"},{id:"importa",label:"Importa Excel",icon:"📥"},{id:"documenti",label:"Documenti",icon:"📁"},{id:"contatti",label:"Contatti Studio",icon:"📞"}];
-  const tok = user.token;
+  const nav=[
+    {id:"condominii",label:"Condomìni",icon:"🏢"},
+    {id:"utenti",    label:"Utenti",   icon:"👥"},
+    {id:"importa",   label:"Importa Excel",icon:"📥"},
+    {id:"documenti", label:"Documenti",icon:"📁"},
+    {id:"contatti",  label:"Contatti Studio",icon:"📞"},
+  ];
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar items={nav} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
       <div className="flex-1 p-8 overflow-auto">
         <div className="max-w-4xl mx-auto">
-          {view==="condominii" && <AdminCondominii tok={tok}/>}
-          {view==="utenti"     && <AdminUtenti tok={tok}/>}
-          {view==="importa"    && <AdminImport tok={tok}/>}
-          {view==="documenti"  && <AdminDocumenti tok={tok}/>}
-          {view==="contatti"   && <AdminContatti tok={tok}/>}
+          {view==="condominii" && <AdminCondominii tok={user.token}/>}
+          {view==="utenti"     && <AdminUtenti tok={user.token}/>}
+          {view==="importa"    && <AdminImport tok={user.token}/>}
+          {view==="documenti"  && <AdminDocumenti tok={user.token}/>}
+          {view==="contatti"   && <AdminContatti tok={user.token}/>}
         </div>
       </div>
     </div>
   );
-}
-
-function useData(fn, deps=[]) {
-  const [data,setData]=useState(null); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
-  const load = useCallback(async()=>{ setLoading(true); setErr(""); try { setData(await fn()); } catch(e){setErr(e.message);} setLoading(false); }, deps);
-  useEffect(()=>{load();},[load]);
-  return {data,loading,err,reload:load};
 }
 
 // Admin — Condomìni
@@ -413,14 +225,13 @@ function AdminCondominii({tok}) {
   const [modal,setModal]=useState(null);
   const save = async(f) => {
     try {
-      if (modal.mode==="add") await POST("condominii",f,tok);
-      else await PATCH("condominii",`id=eq.${f.id}`,f,tok);
+      modal.mode==="add" ? await POST("condominii",f,tok) : await PATCH("condominii",`id=eq.${f.id}`,f,tok);
       setModal(null); reload();
     } catch(e){alert(e.message);}
   };
   const remove = async(id) => {
     if(!window.confirm("Eliminare?")) return;
-    try { await DEL("condominii",`id=eq.${id}`,tok); reload(); } catch(e){alert(e.message);}
+    try{await DEL("condominii",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);}
   };
   return (
     <div>
@@ -430,7 +241,7 @@ function AdminCondominii({tok}) {
       </div>
       <ErrBox msg={err}/>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? <Spinner/> : !list?.length ? <EmptyState icon="🏢" text="Nessun condominio."/> : list.map((c,i)=>(
+        {loading?<Spinner/>:!list?.length?<EmptyState icon="🏢" text="Nessun condominio."/>:list.map((c,i)=>(
           <div key={c.id} className={`flex items-center justify-between p-5 ${i<list.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
@@ -465,40 +276,31 @@ function AdminUtenti({tok}) {
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
   const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
   const [modal,setModal]=useState(null);
-
   const load = useCallback(async()=>{
     setLoading(true); setErr("");
     try {
       let qs=`role=eq.condomino&select=*,condominii(nome,citta)&order=name&limit=${PS+1}&offset=${page*PS}`;
-      if (search) qs+=`&or=(name.ilike.*${encodeURIComponent(search)}*,email.ilike.*${encodeURIComponent(search)}*)`;
-      if (filterCond) qs+=`&cond_id=eq.${filterCond}`;
+      if(search) qs+=`&or=(name.ilike.*${encodeURIComponent(search)}*,email.ilike.*${encodeURIComponent(search)}*)`;
+      if(filterCond) qs+=`&cond_id=eq.${filterCond}`;
       const d=await GET("profiles",qs,tok);
       setHasMore(d.length>PS); setUsers(d.slice(0,PS));
-    } catch(e){setErr(e.message);}
+    }catch(e){setErr(e.message);}
     setLoading(false);
   },[tok,search,filterCond,page]);
-
   useEffect(()=>{load();},[load]);
   useEffect(()=>setPage(0),[search,filterCond]);
-
   const save = async(f) => {
     try {
-      if (modal.mode==="add") {
-        const auth = await sb("/auth/v1/signup",{method:"POST",body:{email:f.email,password:f.pwd}});
-        const uid = auth.user?.id || auth.id;
-        if (!uid) throw new Error("Impossibile creare l'utente. Verifica che la email non sia già registrata.");
+      if(modal.mode==="add") {
+        const {id:uid} = await createAuthUser(f.email||null, f.pwd);
         await POST("profiles",{id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno},tok);
       } else {
         await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno},tok);
       }
       setModal(null); load();
-    } catch(e){alert(e.message);}
+    }catch(e){alert(e.message);}
   };
-  const remove = async(id) => {
-    if(!window.confirm("Eliminare questo utente?")) return;
-    try { await DEL("profiles",`id=eq.${id}`,tok); load(); } catch(e){alert(e.message);}
-  };
-
+  const remove = async(id) => { if(window.confirm("Eliminare?")) { try{await DEL("profiles",`id=eq.${id}`,tok); load();}catch(e){alert(e.message);} } };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -514,14 +316,11 @@ function AdminUtenti({tok}) {
       </div>
       <ErrBox msg={err}/>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? <Spinner/> : !users.length ? <EmptyState icon="👥" text="Nessun utente trovato."/> : users.map((u,i)=>(
+        {loading?<Spinner/>:!users.length?<EmptyState icon="👥" text="Nessun utente trovato."/>:users.map((u,i)=>(
           <div key={u.id} className={`flex items-center justify-between p-4 ${i<users.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-sm">{u.name?.charAt(0)}</div>
-              <div>
-                <p className="font-semibold text-gray-800 text-sm">{u.name}</p>
-                <p className="text-xs text-gray-400">{u.condominii?.nome} · Sc.{u.scala} Int.{u.interno}</p>
-              </div>
+              <div><p className="font-semibold text-gray-800 text-sm">{u.name}</p><p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p></div>
             </div>
             <div className="flex gap-2">
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
@@ -546,13 +345,13 @@ function UserModal({mode,data,condominii,onSave,onClose}) {
   return (
     <Modal title={mode==="add"?"Nuovo Utente":"Modifica Utente"} onClose={onClose}>
       <Inp label="Nome e Cognome" value={f.name} onChange={e=>s("name",e.target.value)}/>
-      {mode==="add" && <><Inp label="Email" type="email" value={f.email} onChange={e=>s("email",e.target.value)}/><Inp label="Password" value={f.pwd} onChange={e=>s("pwd",e.target.value)}/></>}
+      {mode==="add" && <><Inp label="Email (opzionale)" type="email" value={f.email} onChange={e=>s("email",e.target.value)} hint="Lascia vuoto se il condomino non ha email"/><Inp label="Password" value={f.pwd} onChange={e=>s("pwd",e.target.value)}/></>}
       <Sel label="Condominio" value={f.cond_id} onChange={e=>s("cond_id",e.target.value)}>
         <option value="">— Seleziona —</option>
         {condominii.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
       </Sel>
       <div className="flex gap-3">
-        <div className="flex-1"><Inp label="Scala" value={f.scala} onChange={e=>s("scala",e.target.value)}/></div>
+        <div className="flex-1"><Inp label="Civico" value={f.scala} onChange={e=>s("scala",e.target.value)}/></div>
         <div className="flex-1"><Inp label="Interno" value={f.interno} onChange={e=>s("interno",e.target.value)}/></div>
       </div>
       <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.name&&onSave(f)}>Salva</Btn></div>
@@ -560,52 +359,167 @@ function UserModal({mode,data,condominii,onSave,onClose}) {
   );
 }
 
-// Admin — Documenti
-function AdminDocumenti({tok}) {
+// Admin — Importa Excel
+function AdminImport({tok}) {
   const {data:condominii} = useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
-  const [tipo,setTipo]=useState("cond");
-  const [selCond,setSelCond]=useState(""); const [selUid,setSelUid]=useState("");
-  const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false);
-  const [modal,setModal]=useState(false);
+  const [selCond,setSelCond]=useState("");
+  const [rows,setRows]=useState([]); const [preview,setPreview]=useState(false);
+  const [importing,setImporting]=useState(false); const [progress,setProgress]=useState(0);
+  const [results,setResults]=useState(null); const [err,setErr]=useState("");
 
   useEffect(()=>{ if(condominii?.length && !selCond) setSelCond(String(condominii[0].id)); },[condominii]);
-  useEffect(()=>{
-    if(!selCond) return;
-    GET("profiles",`cond_id=eq.${selCond}&role=eq.condomino&select=id,name,scala,interno&order=name`,tok).then(d=>{setUsers(d||[]); setSelUid(d?.[0]?.id||"");});
-  },[selCond,tok]);
-  useEffect(()=>{ loadDocs(); },[tipo,selCond,selUid,tok]);
 
-  const loadDocs = async() => {
-    if(!selCond) return;
-    setLoading(true);
+  const parseExcel = async(file) => {
+    setErr(""); setRows([]); setPreview(false); setResults(null);
     try {
-      if(tipo==="cond") setDocs(await GET("docs",`cond_id=eq.${selCond}&select=*&order=uploaded_at.desc`,tok)||[]);
-      else if(selUid) setDocs(await GET("personal_docs",`user_id=eq.${selUid}&select=*&order=uploaded_at.desc`,tok)||[]);
-      else setDocs([]);
-    } catch{setDocs([]);}
-    setLoading(false);
+      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws,{defval:""});
+      const col = (row,names) => { for(const n of names){ const v=row[n]; if(v!==undefined&&v!=="") return String(v).trim(); } return ""; };
+      const proprietari = data.filter(r=>col(r,["Tipo Cond.","Tipo cond.","TIPO COND."]).toLowerCase()==="proprietario");
+      const parsed = proprietari.map(r=>{
+        const nUn = col(r,["N. Un.","N.Un.","N Un"]);
+        const inquilini = data.filter(i=>col(i,["Tipo Cond.","Tipo cond."]).toLowerCase()==="inquilino"&&col(i,["N. Un.","N.Un.","N Un"])===nUn)
+          .map(i=>({nome:col(i,["Nome","NOME"]),email:col(i,["Email","EMAIL","email"]),tel:col(i,["Telefono","TELEFONO","Tel","Tel 2"])}));
+        const nomeCompleto = col(r,["Nome","NOME"]);
+        const primoToken = nomeCompleto.split(/\s+/)[0]||"Utente";
+        const cognome = primoToken.charAt(0).toUpperCase()+primoToken.slice(1).toLowerCase();
+        const mese = String(new Date().getMonth()+1).padStart(2,"0");
+        return {
+          nome:nomeCompleto, email:col(r,["Email","EMAIL","email"]),
+          password:`${cognome}${mese}!`,
+          interno:col(r,["Interno","INTERNO"]), civico:col(r,["Civico","CIVICO"]),
+          foglio:col(r,["Foglio","FOGLIO"]), particella:col(r,["Mappale","MAPPALE"]),
+          subalterno:col(r,["Sub","SUB"]), inquilini,
+        };
+      });
+      setRows(parsed); setPreview(true);
+    }catch(e){setErr("Errore lettura file: "+e.message);}
   };
 
-  const addDoc = async(f) => {
-    try {
-      const body = tipo==="cond"
-        ? {cond_id:Number(selCond),...f}
-        : {user_id:selUid,...f};
-      await POST(tipo==="cond"?"docs":"personal_docs",body,tok);
-      setModal(false); loadDocs();
-    } catch(e){alert(e.message);}
+  const doImport = async() => {
+    if(!selCond){setErr("Seleziona un condominio."); return;}
+    setImporting(true); setErr(""); setProgress(0);
+    const ok=[],noEmail=[],failed=[];
+    const condo = condominii?.find(c=>String(c.id)===String(selCond));
+
+    for(let i=0;i<rows.length;i++){
+      const r=rows[i];
+      setProgress(Math.round(((i+1)/rows.length)*100));
+      try {
+        // 1. Crea utente tramite Admin API
+        const {id:uid,hasRealEmail} = await createAuthUser(r.email||null, r.password);
+
+        // 2. Inserisci profilo
+        await POST("profiles",{id:uid,name:r.nome,role:"condomino",cond_id:Number(selCond),scala:r.civico,interno:r.interno},tok);
+
+        // 3. Dati catastali
+        if(r.foglio||r.particella||r.subalterno)
+          await UPS("catastali",{user_id:uid,foglio:r.foglio,particella:r.particella,subalterno:r.subalterno,updated_at:new Date().toISOString()},tok);
+
+        // 4. Inquilini
+        for(const inq of r.inquilini)
+          if(inq.nome) await POST("inquilini",{user_id:uid,nome:inq.nome,email:inq.email,tel:inq.tel},tok);
+
+        // 5. Email di benvenuto
+        if(hasRealEmail && r.email) {
+          try { await sendWelcomeEmail(r.email,r.nome,r.password,condo?.nome||""); ok.push(r); }
+          catch{ noEmail.push(r); }
+        } else { noEmail.push(r); }
+
+        // Pausa tra richieste
+        await new Promise(res=>setTimeout(res,200));
+      }catch(e){ failed.push({...r,errore:e.message}); }
+    }
+    setResults({ok,noEmail,failed}); setImporting(false);
   };
-  const remove = async(id) => {
-    if(!window.confirm("Eliminare?")) return;
-    try { await DEL(tipo==="cond"?"docs":"personal_docs",`id=eq.${id}`,tok); loadDocs(); } catch(e){alert(e.message);}
+
+  const stampa = () => {
+    const condo = condominii?.find(c=>String(c.id)===String(selCond));
+    const tutti = [...(results?.ok||[]),...(results?.noEmail||[])];
+    const w = window.open("","_blank");
+    w.document.write(`<html><head><title>Credenziali</title>
+    <style>body{font-family:sans-serif;padding:20px}h1{color:#1e40af}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#f1f5f9}@media print{button{display:none}}</style>
+    </head><body>
+    <h1>Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</h1>
+    <h2>Credenziali — ${condo?.nome||""}</h2>
+    <p>Data: ${new Date().toLocaleDateString("it-IT")} | Portale: <strong>studiomazzinibo.com</strong></p>
+    <table><tr><th>Nome</th><th>Interno</th><th>Email</th><th>Password</th></tr>
+    ${tutti.map(r=>`<tr><td>${r.nome}</td><td>${r.interno}</td><td>${r.email||"—"}</td><td>${r.password}</td></tr>`).join("")}
+    </table><br><button onclick="window.print()">🖨️ Stampa</button>
+    </body></html>`);
+    w.document.close();
   };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-black text-gray-800">Gestione Documenti</h2>
-        <Btn onClick={()=>setModal(true)}>+ Carica documento</Btn>
+      <div className="mb-6"><h2 className="text-2xl font-black text-gray-800">Importazione da Excel</h2><p className="text-gray-400 text-sm mt-0.5">Carica il file Excel per importare i condomini in blocco.</p></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
+        <Sel label="Condominio di destinazione" value={selCond} onChange={e=>setSelCond(e.target.value)}>
+          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
+        </Sel>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">File Excel (.xlsx)</label>
+        <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])}
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
       </div>
+      <ErrBox msg={err}/>
+      {preview && rows.length>0 && !results && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-5">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div><p className="font-bold text-gray-800">Anteprima</p><p className="text-xs text-gray-400">{rows.length} proprietari · {rows.filter(r=>!r.email).length} senza email</p></div>
+            <Btn onClick={doImport} disabled={importing}>{importing?`Importazione... ${progress}%`:"Importa tutti"}</Btn>
+          </div>
+          {importing && <div className="h-1 bg-gray-100"><div className="h-1 bg-blue-500 transition-all" style={{width:`${progress}%`}}/></div>}
+          <div className="max-h-64 overflow-y-auto">
+            {rows.map((r,i)=>(
+              <div key={i} className={`flex items-center justify-between px-5 py-3 ${i<rows.length-1?"border-b border-gray-50":""}`}>
+                <div><p className="font-medium text-gray-800 text-sm">{r.nome}</p><p className="text-xs text-gray-400">Int.{r.interno} · {r.email||<span className="text-amber-500">nessuna email</span>}</p></div>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-mono">{r.password}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {results && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h3 className="font-bold text-gray-800 mb-4">Risultati importazione</h3>
+          <div className="grid grid-cols-3 gap-4 mb-5">
+            <div className="bg-emerald-50 rounded-xl p-4 text-center"><p className="text-2xl font-black text-emerald-600">{results.ok.length}</p><p className="text-xs text-emerald-600 font-medium">Email inviata</p></div>
+            <div className="bg-amber-50 rounded-xl p-4 text-center"><p className="text-2xl font-black text-amber-600">{results.noEmail.length}</p><p className="text-xs text-amber-600 font-medium">Senza email</p></div>
+            <div className="bg-red-50 rounded-xl p-4 text-center"><p className="text-2xl font-black text-red-600">{results.failed.length}</p><p className="text-xs text-red-600 font-medium">Errori</p></div>
+          </div>
+          <div className="flex gap-3">
+            <Btn variant="success" onClick={stampa}>🖨️ Stampa riepilogo credenziali</Btn>
+            <Btn variant="secondary" onClick={()=>{setResults(null);setRows([]);setPreview(false);}}>Nuova importazione</Btn>
+          </div>
+          {results.failed.length>0 && (
+            <div className="mt-4 bg-red-50 rounded-xl p-4">
+              <p className="text-xs font-semibold text-red-600 mb-2">Righe con errore:</p>
+              {results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">{r.nome}: {r.errore}</p>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Admin — Documenti
+function AdminDocumenti({tok}) {
+  const {data:condominii} = useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const [tipo,setTipo]=useState("cond"); const [selCond,setSelCond]=useState(""); const [selUid,setSelUid]=useState("");
+  const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false); const [modal,setModal]=useState(false);
+  useEffect(()=>{ if(condominii?.length && !selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=eq.condomino&select=id,name,scala,interno&order=name`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
+  useEffect(()=>{loadDocs();},[tipo,selCond,selUid,tok]);
+  const loadDocs = async()=>{ if(!selCond) return; setLoading(true); try{ tipo==="cond"?setDocs(await GET("docs",`cond_id=eq.${selCond}&select=*&order=uploaded_at.desc`,tok)||[]):selUid?setDocs(await GET("personal_docs",`user_id=eq.${selUid}&select=*&order=uploaded_at.desc`,tok)||[]):setDocs([]); }catch{setDocs([]);} setLoading(false); };
+  const addDoc = async(f)=>{ try{ tipo==="cond"?await POST("docs",{cond_id:Number(selCond),...f},tok):await POST("personal_docs",{user_id:selUid,...f},tok); setModal(false); loadDocs(); }catch(e){alert(e.message);} };
+  const remove = async(id)=>{ if(!window.confirm("Eliminare?")) return; try{tipo==="cond"?await DEL("docs",`id=eq.${id}`,tok):await DEL("personal_docs",`id=eq.${id}`,tok); loadDocs();}catch(e){alert(e.message);} };
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6"><h2 className="text-2xl font-black text-gray-800">Gestione Documenti</h2><Btn onClick={()=>setModal(true)}>+ Carica documento</Btn></div>
       <div className="flex gap-2 mb-5">
         {[{k:"cond",l:"🏢 Condominiali"},{k:"personal",l:"👤 Personali"}].map(({k,l})=>(
           <button key={k} onClick={()=>setTipo(k)} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${tipo===k?"bg-slate-800 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>{l}</button>
@@ -613,24 +527,19 @@ function AdminDocumenti({tok}) {
       </div>
       <div className="flex gap-3 mb-5">
         <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1" value={selCond} onChange={e=>setSelCond(e.target.value)}>
-          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
         </select>
-        {tipo==="personal" && (
-          <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1" value={selUid} onChange={e=>setSelUid(e.target.value)}>
-            <option value="">— Seleziona condomino —</option>
-            {users.map(u=><option key={u.id} value={u.id}>{u.name} · Int.{u.interno}</option>)}
-          </select>
-        )}
+        {tipo==="personal" && <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1" value={selUid} onChange={e=>setSelUid(e.target.value)}>
+          <option value="">— Seleziona condomino —</option>
+          {users.map(u=><option key={u.id} value={u.id}>{u.name} · Int.{u.interno}</option>)}
+        </select>}
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? <Spinner/> : !docs.length ? <EmptyState icon="📭" text="Nessun documento presente."/> : docs.map((d,i)=>(
+        {loading?<Spinner/>:!docs.length?<EmptyState icon="📭" text="Nessun documento."/>:docs.map((d,i)=>(
           <div key={d.id} className={`flex items-center justify-between p-4 ${i<docs.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-lg">📄</div>
-              <div>
-                <p className="font-medium text-gray-800 text-sm">{d.name}</p>
-                <div className="flex items-center gap-2 mt-1"><Badge cat={d.cat}/><span className="text-xs text-gray-400">{d.year} · {d.size} · {new Date(d.uploaded_at).toLocaleDateString("it-IT")}</span></div>
-              </div>
+              <div><p className="font-medium text-gray-800 text-sm">{d.name}</p><div className="flex items-center gap-2 mt-1"><Badge cat={d.cat}/><span className="text-xs text-gray-400">{d.year} · {d.size}</span></div></div>
             </div>
             <Btn variant="danger" onClick={()=>remove(d.id)}>Elimina</Btn>
           </div>
@@ -659,11 +568,8 @@ function AdminContatti({tok}) {
   const [f,setF]=useState(null); const [saved,setSaved]=useState(false);
   useEffect(()=>{ if(data?.[0]) setF({...data[0]}); },[data]);
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
-  const save = async() => {
-    try { await UPS("contatti",{...f,updated_at:new Date().toISOString()},tok); reload(); setSaved(true); setTimeout(()=>setSaved(false),2500); }
-    catch(e){alert(e.message);}
-  };
-  if (!f) return <Spinner/>;
+  const save=async()=>{ try{await UPS("contatti",{...f,updated_at:new Date().toISOString()},tok); reload(); setSaved(true); setTimeout(()=>setSaved(false),2500);}catch(e){alert(e.message);} };
+  if(!f) return <Spinner/>;
   const fields=[{k:"nome",l:"Nome studio"},{k:"telefono",l:"Telefono"},{k:"email",l:"Email"},{k:"indirizzo",l:"Indirizzo"},{k:"orari",l:"Orari"}];
   return (
     <div>
@@ -694,7 +600,7 @@ function CondominoPanel({user,onLogout,view,setView}) {
           <div className="max-w-3xl mx-auto">
             <div className="bg-white border border-gray-100 rounded-2xl px-5 py-3 mb-6 flex items-center gap-3 shadow-sm">
               <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
-              <div><p className="text-sm font-bold text-gray-800">{condo?.nome||"Condominio"}</p><p className="text-xs text-gray-400">{condo?.indirizzo} · {condo?.cap} {condo?.citta} · Scala {user.scala} · Int. {user.interno}</p></div>
+              <div><p className="text-sm font-bold text-gray-800">{condo?.nome||"Condominio"}</p><p className="text-xs text-gray-400">{condo?.indirizzo} · {condo?.cap} {condo?.citta} · Int. {user.interno}</p></div>
             </div>
             {view==="docs" && <CondDocs user={user}/>}
             {view==="inq"  && <CondInquilini user={user}/>}
@@ -719,7 +625,7 @@ function CondDocs({user}) {
       <h2 className="text-2xl font-black text-gray-800 mb-5">Documenti</h2>
       <div className="flex gap-2 mb-4">
         {[{k:"cond",l:"🏢 Condominiali"},{k:"personal",l:"👤 Personali"}].map(({k,l})=>(
-          <button key={k} onClick={()=>setSezione(k)} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${sezione===k?"bg-slate-800 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>{l}</button>
+          <button key={k} onClick={()=>setSezione(k)} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${sezione===k?"bg-slate-800 text-white shadow-sm":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>{l}</button>
         ))}
       </div>
       <div className="flex gap-2 mb-5 flex-wrap">
@@ -730,11 +636,11 @@ function CondDocs({user}) {
         ))}
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? <Spinner/> : !docs?.length ? <EmptyState icon={CAT_ICONS[tab]} text={`Nessun documento in "${CAT_LABELS[tab]}".`}/> : docs.map((d,i)=>(
+        {loading?<Spinner/>:!docs?.length?<EmptyState icon={CAT_ICONS[tab]} text={`Nessun documento in "${CAT_LABELS[tab]}".`}/>:docs.map((d,i)=>(
           <div key={d.id} className={`flex items-center justify-between p-4 hover:bg-gray-50 transition ${i<docs.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-xl">📄</div>
-              <div><p className="font-medium text-gray-800 text-sm">{d.name}</p><p className="text-xs text-gray-400 mt-0.5">Anno {d.year} · {d.size} · {new Date(d.uploaded_at).toLocaleDateString("it-IT")}</p></div>
+              <div><p className="font-medium text-gray-800 text-sm">{d.name}</p><p className="text-xs text-gray-400 mt-0.5">Anno {d.year} · {d.size}</p></div>
             </div>
             <Btn variant="secondary">⬇ Scarica</Btn>
           </div>
@@ -747,14 +653,8 @@ function CondDocs({user}) {
 function CondInquilini({user}) {
   const {data:inq,loading,reload} = useData(()=>GET("inquilini",`user_id=eq.${user.id}&select=*&order=created_at`,user.token),[user.token,user.id]);
   const [modal,setModal]=useState(null);
-  const save = async(f) => {
-    try {
-      if(modal.mode==="add") await POST("inquilini",{...f,user_id:user.id},user.token);
-      else await PATCH("inquilini",`id=eq.${f.id}`,f,user.token);
-      setModal(null); reload();
-    } catch(e){alert(e.message);}
-  };
-  const remove = async(id) => { if(window.confirm("Rimuovere?")) { try { await DEL("inquilini",`id=eq.${id}`,user.token); reload(); } catch(e){alert(e.message);} } };
+  const save=async(f)=>{ try{modal.mode==="add"?await POST("inquilini",{...f,user_id:user.id},user.token):await PATCH("inquilini",`id=eq.${f.id}`,f,user.token); setModal(null); reload();}catch(e){alert(e.message);} };
+  const remove=async(id)=>{ if(window.confirm("Rimuovere?")) { try{await DEL("inquilini",`id=eq.${id}`,user.token); reload();}catch(e){alert(e.message);} } };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -762,15 +662,11 @@ function CondInquilini({user}) {
         <Btn onClick={()=>setModal({mode:"add",data:{nome:"",email:"",tel:"",dal:"",al:""}})}>+ Aggiungi</Btn>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? <Spinner/> : !inq?.length ? <EmptyState icon="🏠" text="Nessun inquilino registrato."/> : inq.map((i,idx)=>(
+        {loading?<Spinner/>:!inq?.length?<EmptyState icon="🏠" text="Nessun inquilino registrato."/>:inq.map((i,idx)=>(
           <div key={i.id} className={`flex items-center justify-between p-5 ${idx<inq.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold text-sm">{i.nome?.charAt(0)}</div>
-              <div>
-                <p className="font-semibold text-gray-800">{i.nome}</p>
-                <p className="text-xs text-gray-400">{i.email}{i.tel?` · ${i.tel}`:""}</p>
-                <p className="text-xs text-gray-400">{i.dal?`Dal ${new Date(i.dal).toLocaleDateString("it-IT")}`:""}{i.al?` al ${new Date(i.al).toLocaleDateString("it-IT")}`:" · (in corso)"}</p>
-              </div>
+              <div><p className="font-semibold text-gray-800">{i.nome}</p><p className="text-xs text-gray-400">{i.email}{i.tel?` · ${i.tel}`:""}</p><p className="text-xs text-gray-400">{i.dal?`Dal ${new Date(i.dal).toLocaleDateString("it-IT")}`:""}{i.al?` al ${new Date(i.al).toLocaleDateString("it-IT")}`:" · (in corso)"}</p></div>
             </div>
             <div className="flex gap-2"><Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...i}})}>Modifica</Btn><Btn variant="danger" onClick={()=>remove(i.id)}>Rimuovi</Btn></div>
           </div>
@@ -795,14 +691,11 @@ function InqModal({mode,data,onSave,onClose}) {
 
 function CondCatastali({user}) {
   const {data,reload} = useData(()=>GET("catastali",`user_id=eq.${user.id}`,user.token),[user.token,user.id]);
-  const empty = {foglio:"",particella:"",subalterno:"",categoria:"",classe:"",consistenza:"",rendita:"",superficie:""};
+  const empty={foglio:"",particella:"",subalterno:"",categoria:"",classe:"",consistenza:"",rendita:"",superficie:""};
   const [f,setF]=useState(empty); const [saved,setSaved]=useState(false);
   useEffect(()=>{ if(data?.[0]) setF({...data[0]}); else setF(empty); },[data]);
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
-  const save = async() => {
-    try { await UPS("catastali",{...f,user_id:user.id,updated_at:new Date().toISOString()},user.token); reload(); setSaved(true); setTimeout(()=>setSaved(false),2500); }
-    catch(e){alert(e.message);}
-  };
+  const save=async()=>{ try{await UPS("catastali",{...f,user_id:user.id,updated_at:new Date().toISOString()},user.token); reload(); setSaved(true); setTimeout(()=>setSaved(false),2500);}catch(e){alert(e.message);} };
   const fields=[{k:"foglio",l:"Foglio",p:"Es. 15"},{k:"particella",l:"Particella",p:"Es. 234"},{k:"subalterno",l:"Subalterno",p:"Es. 3"},{k:"categoria",l:"Categoria catastale",p:"Es. A/2"},{k:"classe",l:"Classe",p:"Es. 3"},{k:"consistenza",l:"Consistenza",p:"Es. 5 vani"},{k:"rendita",l:"Rendita (€)",p:"Es. 520,00"},{k:"superficie",l:"Superficie (mq)",p:"Es. 85"}];
   return (
     <div>
@@ -810,10 +703,7 @@ function CondCatastali({user}) {
       <p className="text-gray-400 text-sm mb-5">Inserisci o aggiorna i dati catastali della tua unità.</p>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="grid grid-cols-2 gap-x-5">{fields.map(({k,l,p})=><Inp key={k} label={l} value={f[k]||""} onChange={e=>s(k,e.target.value)} placeholder={p}/>)}</div>
-        <div className="flex items-center gap-4 mt-3 pt-4 border-t border-gray-100">
-          <Btn variant="success" onClick={save}>✓ Salva dati catastali</Btn>
-          {saved && <p className="text-emerald-600 text-sm font-semibold">Salvato!</p>}
-        </div>
+        <div className="flex items-center gap-4 mt-3 pt-4 border-t border-gray-100"><Btn variant="success" onClick={save}>✓ Salva dati catastali</Btn>{saved&&<p className="text-emerald-600 text-sm font-semibold">Salvato!</p>}</div>
       </div>
     </div>
   );
@@ -822,33 +712,26 @@ function CondCatastali({user}) {
 // ── App Root ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [user,setUser]=useState(null); const [view,setView]=useState("docs"); const [checking,setChecking]=useState(true);
-
   useEffect(()=>{
     (async()=>{
       try {
         const saved = localStorage.getItem("sb_session_v1");
-        if (saved) {
+        if(saved) {
           const sess = JSON.parse(saved);
           const profiles = await GET("profiles",`id=eq.${sess.id}&select=*,condominii(*)`,sess.token);
-          if (profiles?.length) { setUser({...sess,...profiles[0]}); setView(sess.role==="admin"?"condominii":"docs"); }
+          if(profiles?.length) { setUser({...sess,...profiles[0]}); setView(sess.role==="admin"?"condominii":"docs"); }
         }
-      } catch{}
+      }catch{}
       setChecking(false);
     })();
   },[]);
-
-  const handleLogin = async(u) => {
-    try { localStorage.setItem("sb_session_v1", JSON.stringify({id:u.id,token:u.token,role:u.role})); } catch{}
-    setUser(u); setView(u.role==="admin"?"condominii":"docs");
-  };
-  const handleLogout = async() => {
-    try { await sb("/auth/v1/logout",{method:"POST",token:user.token}); } catch{}
-    try { localStorage.removeItem("sb_session_v1"); } catch{}
-    setUser(null);
-  };
-
-  if (checking) return <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-300 border-t-white rounded-full animate-spin"/></div>;
-  if (!user) return <Login onLogin={handleLogin}/>;
-  if (user.role==="admin") return <AdminPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>;
+  useEffect(()=>{
+    if(!checking&&!user) localStorage.removeItem("sb_session_v1");
+  },[checking,user]);
+  const handleLogin=async(u)=>{ try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role}));}catch{} setUser(u); setView(u.role==="admin"?"condominii":"docs"); };
+  const handleLogout=async()=>{ try{await sb("/auth/v1/logout",{method:"POST",token:user.token});}catch{} localStorage.removeItem("sb_session_v1"); setUser(null); };
+  if(checking) return <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-300 border-t-white rounded-full animate-spin"/></div>;
+  if(!user) return <Login onLogin={handleLogin}/>;
+  if(user.role==="admin") return <AdminPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>;
   return <CondominoPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>;
 }
