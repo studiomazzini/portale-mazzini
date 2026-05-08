@@ -60,6 +60,28 @@ async function sendWelcomeEmail(email, nome, password, condoNome) {
   });
 }
 
+// ── Storage helpers ───────────────────────────────────────────────────────────
+async function uploadFile(bucket, filePath, file, token) {
+  const r = await fetch(`${SB_URL}/storage/v1/object/${bucket}/${filePath}`, {
+    method:"POST",
+    headers:{ "apikey":SB_KEY, "Authorization":`Bearer ${token}`, "Content-Type":file.type||"application/octet-stream", "x-upsert":"true" },
+    body:file,
+  });
+  if (!r.ok) { const d=await r.json().catch(()=>({})); throw new Error(d.message||d.error||"Errore upload"); }
+  return filePath;
+}
+
+async function getSignedUrl(bucket, filePath, token) {
+  const r = await fetch(`${SB_URL}/storage/v1/object/sign/${bucket}/${filePath}`, {
+    method:"POST",
+    headers:{ "apikey":SB_KEY, "Authorization":`Bearer ${token}`, "Content-Type":"application/json" },
+    body:JSON.stringify({ expiresIn:3600 }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.message||"Errore generazione URL");
+  return `${SB_URL}/storage/v1${d.signedURL}`;
+}
+
 // ── UI Primitives ─────────────────────────────────────────────────────────────
 const Inp = ({label,hint,...p}) => (
   <div className="mb-3">
@@ -564,19 +586,46 @@ function AdminDocumenti({tok}) {
           </div>
         ))}
       </div>
-      {modal && <DocModal onSave={addDoc} onClose={()=>setModal(false)}/>}
+      {modal && <DocModal onSave={addDoc} onClose={()=>setModal(false)}
+        bucket={tipo==="cond"?"docs-condominiali":"docs-personali"}
+        pathPrefix={tipo==="cond"?selCond:selUid}
+        tok={tok}/>}
     </div>
   );
 }
-function DocModal({onSave,onClose}) {
-  const [f,setF]=useState({name:"",cat:"consuntivi",year:new Date().getFullYear(),size:"—"}); const s=(k,v)=>setF(p=>({...p,[k]:v}));
+function DocModal({onSave,onClose,bucket,pathPrefix,tok}) {
+  const [f,setF]=useState({name:"",cat:"consuntivi",year:new Date().getFullYear(),size:"—"});
+  const [file,setFile]=useState(null); const [uploading,setUploading]=useState(false);
+  const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  const handleFile=(e)=>{
+    const fl=e.target.files[0]; if(!fl) return;
+    setFile(fl);
+    s("name",fl.name);
+    s("size",`${(fl.size/1024).toFixed(0)} KB`);
+  };
+  const handleSave=async()=>{
+    if(!file){alert("Seleziona un file PDF."); return;}
+    setUploading(true);
+    try {
+      const safeName=file.name.replace(/\s+/g,"_");
+      const filePath=`${pathPrefix}/${Date.now()}_${safeName}`;
+      await uploadFile(bucket,filePath,file,tok);
+      onSave({...f,storage_path:filePath});
+    }catch(e){alert(e.message);}
+    setUploading(false);
+  };
   return (
-    <Modal title="Registra Documento" onClose={onClose}>
-      <Inp label="Nome file" value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Es. Consuntivo 2024.pdf"/>
+    <Modal title="Carica Documento" onClose={onClose}>
+      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">File (PDF, Word)</label>
+      <input type="file" accept=".pdf,.doc,.docx" onChange={handleFile}
+        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 mb-3"/>
+      <Inp label="Nome visualizzato" value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Es. Consuntivo 2024.pdf"/>
       <Sel label="Categoria" value={f.cat} onChange={e=>s("cat",e.target.value)}>{Object.entries(CAT_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</Sel>
       <Inp label="Anno" type="number" value={f.year} onChange={e=>s("year",Number(e.target.value))}/>
-      <Inp label="Dimensione" value={f.size} onChange={e=>s("size",e.target.value)} placeholder="Es. 245 KB" hint="Facoltativo"/>
-      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.name&&onSave(f)} disabled={!f.name}>Aggiungi</Btn></div>
+      <div className="flex justify-end gap-3 pt-2">
+        <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+        <Btn onClick={handleSave} disabled={!file||uploading}>{uploading?"Caricamento...":"⬆ Carica"}</Btn>
+      </div>
     </Modal>
   );
 }
@@ -639,9 +688,15 @@ function CondDocs({user}) {
       ? GET("docs",`cond_id=eq.${user.cond_id}&cat=eq.${tab}&select=*&order=uploaded_at.desc`,user.token)
       : GET("personal_docs",`user_id=eq.${user.id}&cat=eq.${tab}&select=*&order=uploaded_at.desc`,user.token),
     [sezione,tab,user.token,user.cond_id,user.id]);
-  return (
-    <div>
-      <h2 className="text-2xl font-black text-gray-800 mb-5">Documenti</h2>
+  const handleDownload = async(d) => {
+    if (!d.storage_path) { alert("File non disponibile."); return; }
+    try {
+      const bucket = sezione==="cond" ? "docs-condominiali" : "docs-personali";
+      const url = await getSignedUrl(bucket, d.storage_path, user.token);
+      window.open(url, "_blank");
+    } catch(e) { alert("Errore download: "+e.message); }
+  };
+
       <div className="flex gap-2 mb-4">
         {[{k:"cond",l:"🏢 Condominiali"},{k:"personal",l:"👤 Personali"}].map(({k,l})=>(
           <button key={k} onClick={()=>setSezione(k)} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${sezione===k?"bg-slate-800 text-white shadow-sm":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>{l}</button>
@@ -661,7 +716,7 @@ function CondDocs({user}) {
               <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-xl">📄</div>
               <div><p className="font-medium text-gray-800 text-sm">{d.name}</p><p className="text-xs text-gray-400 mt-0.5">Anno {d.year} · {d.size}</p></div>
             </div>
-            <Btn variant="secondary">⬇ Scarica</Btn>
+                          <Btn variant="secondary" onClick={()=>handleDownload(d)}>⬇ Scarica</Btn>
           </div>
         ))}
       </div>
