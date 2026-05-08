@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 
 // ── Supabase config ───────────────────────────────────────────────────────────
-const SB_URL = import.meta.env.VITE_SUPABASE_URL;
-const SB_KEY = import.meta.env.VITE_SUPABASE_KEY;
+const SB_URL = "https://ybjivemwjiqqykzmyhoe.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inliaml2ZW13amlxcXlrem15aG9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMjY5ODEsImV4cCI6MjA5MzgwMjk4MX0.TTF4NH-Rq5lk2DD0Yo7DUCQ_miUf3I9TBpORkJ8E3sM";
 const PS = 25; // page size
 
 // ── API layer ─────────────────────────────────────────────────────────────────
@@ -149,9 +149,225 @@ function Login({onLogin}) {
   );
 }
 
+// ── Import Excel ──────────────────────────────────────────────────────────────
+function AdminImport({tok}) {
+  const {data:condominii} = useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const [selCond,setSelCond]=useState("");
+  const [rows,setRows]=useState([]);
+  const [preview,setPreview]=useState(false);
+  const [importing,setImporting]=useState(false);
+  const [results,setResults]=useState(null);
+  const [err,setErr]=useState("");
+
+  useEffect(()=>{ if(condominii?.length && !selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+
+  const parseExcel = async(file) => {
+    setErr(""); setRows([]); setPreview(false); setResults(null);
+    try {
+      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, {defval:""});
+      
+      // Filtra solo proprietari
+      const proprietari = data.filter(r => {
+        const tipo = String(r["Tipo Cond."]||r["Tipo cond."]||r["TIPO COND."]||"").trim().toLowerCase();
+        return tipo === "proprietario";
+      });
+
+      // Per ogni proprietario, trova i suoi inquilini
+      const parsed = proprietari.map(r => {
+        const nUn = r["N. Un."] || r["N.Un."] || r["N Un"] || "";
+        const inquilini = data.filter(i => {
+          const tipoI = String(i["Tipo Cond."]||i["Tipo cond."]||"").trim().toLowerCase();
+          const nUnI = i["N. Un."] || i["N.Un."] || i["N Un"] || "";
+          return tipoI === "inquilino" && String(nUnI) === String(nUn);
+        }).map(i => ({
+          nome: String(i["Nome"]||"").trim(),
+          email: String(i["Email"]||i["EMAIL"]||"").trim(),
+          tel: String(i["Telefono"]||i["TELEFONO"]||"").trim(),
+        }));
+
+        const nomeCompleto = String(r["Nome"]||r["NOME"]||"").trim();
+        const primoToken = nomeCompleto.split(/\s+/)[0] || "Utente";
+        const cognome = primoToken.charAt(0).toUpperCase() + primoToken.slice(1).toLowerCase();
+        const mese = String(new Date().getMonth()+1).padStart(2,"0");
+        const password = `${cognome}${mese}!`;
+
+        return {
+          nome: nomeCompleto,
+          email: String(r["Email"]||r["EMAIL"]||r["email"]||"").trim(),
+          password,
+          interno: String(r["Interno"]||r["INTERNO"]||"").trim(),
+          civico: String(r["Civico"]||r["CIVICO"]||"").trim(),
+          via: String(r["Via"]||r["VIA"]||"").trim(),
+          foglio: String(r["Foglio"]||r["FOGLIO"]||"").trim(),
+          particella: String(r["Mappale"]||r["MAPPALE"]||"").trim(),
+          subalterno: String(r["Sub"]||r["SUB"]||"").trim(),
+          inquilini,
+        };
+      });
+
+      setRows(parsed); setPreview(true);
+    } catch(e) { setErr("Errore nella lettura del file: "+e.message); }
+  };
+
+  const doImport = async() => {
+    if (!selCond) { setErr("Seleziona un condominio."); return; }
+    setImporting(true); setErr("");
+    const ok=[], noEmail=[], failed=[];
+
+    for (const r of rows) {
+      try {
+        // Crea utente auth
+        const auth = await sb("/auth/v1/signup",{method:"POST",body:{email:r.email||`noemail_${Date.now()}_${Math.random().toString(36).slice(2)}@placeholder.local`,password:r.password}});
+        const uid = auth.user?.id || auth.id;
+        if (!uid) throw new Error("UID non trovato");
+
+        // Inserisci profilo
+        await POST("profiles",{id:uid,name:r.nome,role:"condomino",cond_id:Number(selCond),scala:r.civico,interno:r.interno},tok);
+
+        // Inserisci dati catastali
+        if (r.foglio||r.particella||r.subalterno) {
+          await UPS("catastali",{user_id:uid,foglio:r.foglio,particella:r.particella,subalterno:r.subalterno,updated_at:new Date().toISOString()},tok);
+        }
+
+        // Inserisci inquilini
+        for (const inq of r.inquilini) {
+          if (inq.nome) await POST("inquilini",{user_id:uid,nome:inq.nome,email:inq.email,tel:inq.tel},tok);
+        }
+
+        // Invia email se presente
+        if (r.email) {
+          const condo = condominii?.find(c=>String(c.id)===String(selCond));
+          await fetch("https://api.resend.com/emails",{
+            method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":`Bearer ${import.meta.env.VITE_RESEND_KEY}`},
+            body:JSON.stringify({
+              from:"Portale Condominiale <portale@studiomazzinibo.com>",
+              to:[r.email],
+              subject:"Le tue credenziali di accesso al Portale Condominiale",
+              html:`<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+                <h2 style="color:#1e40af">Studio Amministrazioni Immobiliari<br>s.a.s. di Mazzini & C.</h2>
+                <p>Gentile <strong>${r.nome}</strong>,</p>
+                <p>Le sue credenziali per accedere al Portale Condominiale <strong>${condo?.nome||""}</strong> sono:</p>
+                <div style="background:#f1f5f9;padding:16px;border-radius:8px;margin:16px 0">
+                  <p style="margin:4px 0">🌐 <strong>Portale:</strong> <a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>
+                  <p style="margin:4px 0">📧 <strong>Email:</strong> ${r.email}</p>
+                  <p style="margin:4px 0">🔑 <strong>Password:</strong> ${r.password}</p>
+                </div>
+                <p>Si consiglia di cambiare la password al primo accesso.</p>
+                <p style="color:#64748b;font-size:12px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</p>
+              </div>`
+            })
+          });
+          ok.push(r);
+        } else {
+          noEmail.push(r);
+        }
+      } catch(e) { failed.push({...r, errore:e.message}); }
+    }
+
+    setResults({ok, noEmail, failed}); setImporting(false);
+  };
+
+  // Stampa riepilogo
+  const stampa = () => {
+    const condo = condominii?.find(c=>String(c.id)===String(selCond));
+    const tutti = [...(results?.ok||[]), ...(results?.noEmail||[])];
+    const html = `<html><head><title>Credenziali Portale</title>
+    <style>body{font-family:sans-serif;padding:20px} h1{color:#1e40af} table{width:100%;border-collapse:collapse;margin-top:20px} th,td{border:1px solid #ccc;padding:8px;text-align:left} th{background:#f1f5f9} @media print{button{display:none}}</style>
+    </head><body>
+    <h1>Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</h1>
+    <h2>Credenziali di accesso — ${condo?.nome||""}</h2>
+    <p>Data: ${new Date().toLocaleDateString("it-IT")} &nbsp;|&nbsp; Portale: <strong>studiomazzinibo.com</strong></p>
+    <table><tr><th>Nome</th><th>Interno</th><th>Email</th><th>Password</th></tr>
+    ${tutti.map(r=>`<tr><td>${r.nome}</td><td>${r.interno}</td><td>${r.email||"—"}</td><td>${r.password}</td></tr>`).join("")}
+    </table>
+    <br><button onclick="window.print()">🖨️ Stampa</button>
+    </body></html>`;
+    const w = window.open("","_blank");
+    w.document.write(html); w.document.close();
+  };
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-2xl font-black text-gray-800">Importazione da Excel</h2>
+        <p className="text-gray-400 text-sm mt-0.5">Carica il file Excel per importare i condomini in blocco.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
+        <Sel label="Condominio di destinazione" value={selCond} onChange={e=>setSelCond(e.target.value)}>
+          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
+        </Sel>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">File Excel (.xlsx)</label>
+        <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])}
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
+      </div>
+
+      <ErrBox msg={err}/>
+
+      {preview && rows.length>0 && !results && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-5">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div>
+              <p className="font-bold text-gray-800">Anteprima importazione</p>
+              <p className="text-xs text-gray-400 mt-0.5">{rows.length} proprietari trovati · {rows.filter(r=>!r.email).length} senza email</p>
+            </div>
+            <Btn onClick={doImport} disabled={importing}>{importing?"Importazione in corso...":"Importa tutti"}</Btn>
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            {rows.map((r,i)=>(
+              <div key={i} className={`flex items-center justify-between px-5 py-3 ${i<rows.length-1?"border-b border-gray-50":""}`}>
+                <div>
+                  <p className="font-medium text-gray-800 text-sm">{r.nome}</p>
+                  <p className="text-xs text-gray-400">Int. {r.interno} · {r.email||<span className="text-amber-500">nessuna email</span>}</p>
+                </div>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{r.password}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {results && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h3 className="font-bold text-gray-800 mb-4">Risultati importazione</h3>
+          <div className="grid grid-cols-3 gap-4 mb-5">
+            <div className="bg-emerald-50 rounded-xl p-4 text-center">
+              <p className="text-2xl font-black text-emerald-600">{results.ok.length}</p>
+              <p className="text-xs text-emerald-600 font-medium">Importati con email</p>
+            </div>
+            <div className="bg-amber-50 rounded-xl p-4 text-center">
+              <p className="text-2xl font-black text-amber-600">{results.noEmail.length}</p>
+              <p className="text-xs text-amber-600 font-medium">Senza email</p>
+            </div>
+            <div className="bg-red-50 rounded-xl p-4 text-center">
+              <p className="text-2xl font-black text-red-600">{results.failed.length}</p>
+              <p className="text-xs text-red-600 font-medium">Errori</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Btn variant="success" onClick={stampa}>🖨️ Stampa riepilogo credenziali</Btn>
+            <Btn variant="secondary" onClick={()=>{setResults(null);setRows([]);setPreview(false);}}>Nuova importazione</Btn>
+          </div>
+          {results.failed.length>0 && (
+            <div className="mt-4 bg-red-50 rounded-xl p-4">
+              <p className="text-xs font-semibold text-red-600 mb-2">Righe con errore:</p>
+              {results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">{r.nome}: {r.errore}</p>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────────
 function AdminPanel({user,onLogout,view,setView}) {
-  const nav=[{id:"condominii",label:"Condomìni",icon:"🏢"},{id:"utenti",label:"Utenti",icon:"👥"},{id:"documenti",label:"Documenti",icon:"📁"},{id:"contatti",label:"Contatti Studio",icon:"📞"}];
+  const nav=[{id:"condominii",label:"Condomìni",icon:"🏢"},{id:"utenti",label:"Utenti",icon:"👥"},{id:"importa",label:"Importa Excel",icon:"📥"},{id:"documenti",label:"Documenti",icon:"📁"},{id:"contatti",label:"Contatti Studio",icon:"📞"}];
   const tok = user.token;
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -160,6 +376,7 @@ function AdminPanel({user,onLogout,view,setView}) {
         <div className="max-w-4xl mx-auto">
           {view==="condominii" && <AdminCondominii tok={tok}/>}
           {view==="utenti"     && <AdminUtenti tok={tok}/>}
+          {view==="importa"    && <AdminImport tok={tok}/>}
           {view==="documenti"  && <AdminDocumenti tok={tok}/>}
           {view==="contatti"   && <AdminContatti tok={tok}/>}
         </div>
