@@ -221,8 +221,23 @@ function AdminImport({tok}) {
     for (const r of rows) {
       try {
         // Crea utente auth
-        const auth = await sb("/auth/v1/signup",{method:"POST",body:{email:r.email||`noemail_${Date.now()}_${Math.random().toString(36).slice(2)}@placeholder.local`,password:r.password}});
-        const uid = auth.user?.id || auth.id;
+        let uid;
+        if (r.email) {
+          // Con email: usa signup normale
+          const auth = await sb("/auth/v1/signup",{method:"POST",body:{email:r.email,password:r.password}});
+          uid = auth.user?.id || auth.id;
+        } else {
+          // Senza email: usa Admin API con service_role key
+          const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_KEY;
+          const res = await fetch(`${SB_URL}/auth/v1/admin/users`,{
+            method:"POST",
+            headers:{"Content-Type":"application/json","apikey":serviceKey,"Authorization":`Bearer ${serviceKey}`},
+            body:JSON.stringify({password:r.password,email_confirm:true,user_metadata:{name:r.nome}}),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message||data.error||"Errore creazione utente");
+          uid = data.id;
+        }
         if (!uid) throw new Error("UID non trovato");
 
         // Inserisci profilo
