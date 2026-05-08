@@ -378,21 +378,40 @@ function AdminImport({tok}) {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(ws,{defval:""});
       const col = (row,names) => { for(const n of names){ const v=row[n]; if(v!==undefined&&v!=="") return String(v).trim(); } return ""; };
-      const proprietari = data.filter(r=>col(r,["Tipo Cond.","Tipo cond.","TIPO COND."]).toLowerCase()==="proprietario");
+      // Filtra solo proprietari (esclude inquilini ed ex proprietari)
+      const proprietari = data.filter(r=>{
+        const tipo = col(r,["Tipo Cond.","Tipo cond.","TIPO COND."]).toLowerCase();
+        return tipo==="proprietario";
+      });
       const parsed = proprietari.map(r=>{
         const nUn = col(r,["N. Un.","N.Un.","N Un"]);
-        const inquilini = data.filter(i=>col(i,["Tipo Cond.","Tipo cond."]).toLowerCase()==="inquilino"&&col(i,["N. Un.","N.Un.","N Un"])===nUn)
-          .map(i=>({nome:col(i,["Nome","NOME"]),email:col(i,["Email","EMAIL","email"]),tel:col(i,["Telefono","TELEFONO","Tel","Tel 2"])}));
+        // Trova inquilini con stesso N. Un.
+        const inquilini = data.filter(i=>{
+          const tipo = col(i,["Tipo Cond.","Tipo cond."]).toLowerCase();
+          const nUnI = col(i,["N. Un.","N.Un.","N Un"]);
+          return tipo==="inquilino" && nUnI===nUn;
+        }).map(i=>({
+          nome: col(i,["Nome","NOME"]),
+          email: col(i,["Email","EMAIL","email"]),
+          tel: "",
+        }));
         const nomeCompleto = col(r,["Nome","NOME"]);
         const primoToken = nomeCompleto.split(/\s+/)[0]||"Utente";
         const cognome = primoToken.charAt(0).toUpperCase()+primoToken.slice(1).toLowerCase();
         const mese = String(new Date().getMonth()+1).padStart(2,"0");
+        // "Via" contiene l'indirizzo completo incluso il civico
+        // "Unità" contiene il numero dell'unità immobiliare (usato come interno)
         return {
-          nome:nomeCompleto, email:col(r,["Email","EMAIL","email"]),
-          password:`${cognome}${mese}!`,
-          interno:col(r,["Interno","INTERNO"]), civico:col(r,["Civico","CIVICO"]),
-          foglio:col(r,["Foglio","FOGLIO"]), particella:col(r,["Mappale","MAPPALE"]),
-          subalterno:col(r,["Sub","SUB"]), inquilini,
+          nome: nomeCompleto,
+          email: col(r,["Email","EMAIL","email"]),
+          password: `${cognome}${mese}!`,
+          interno: col(r,["Unità","UNITÀ","Unita","UNITA"]),
+          civico: col(r,["Via","VIA"]),
+          foglio: col(r,["Foglio","FOGLIO"]),
+          particella: col(r,["Mappale","MAPPALE"]),
+          subalterno: col(r,["Sub","SUB"]),
+          piano: col(r,["Piano","PIANO"]),
+          inquilini,
         };
       });
       setRows(parsed); setPreview(true);
