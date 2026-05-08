@@ -594,37 +594,44 @@ function AdminDocumenti({tok}) {
   );
 }
 function DocModal({onSave,onClose,bucket,pathPrefix,tok}) {
-  const [f,setF]=useState({name:"",cat:"consuntivi",year:new Date().getFullYear(),size:"—"});
+  const [nome,setNome]=useState(""); const [cat,setCat]=useState("consuntivi"); const [anno,setAnno]=useState(new Date().getFullYear());
   const [file,setFile]=useState(null); const [uploading,setUploading]=useState(false);
-  const s=(k,v)=>setF(p=>({...p,[k]:v}));
-  const handleFile=(e)=>{
-    const fl=e.target.files[0]; if(!fl) return;
-    setFile(fl);
-    s("name",fl.name);
-    s("size",`${(fl.size/1024).toFixed(0)} KB`);
-  };
+  const handleFile=(e)=>{ const fl=e.target.files[0]; if(!fl) return; setFile(fl); setNome(fl.name); };
   const handleSave=async()=>{
-    if(!file){alert("Seleziona un file PDF."); return;}
+    if(!file){alert("Seleziona un file."); return;}
     setUploading(true);
     try {
-      const safeName=file.name.replace(/\s+/g,"_");
+      const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
       const filePath=`${pathPrefix}/${Date.now()}_${safeName}`;
+      const size=`${(file.size/1024).toFixed(0)} KB`;
       await uploadFile(bucket,filePath,file,tok);
-      onSave({...f,storage_path:filePath});
-    }catch(e){alert(e.message);}
+      onSave({name:nome||file.name, cat, year:anno, size, storage_path:filePath});
+    }catch(e){alert("Errore upload: "+e.message);}
     setUploading(false);
   };
   return (
     <Modal title="Carica Documento" onClose={onClose}>
-      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">File (PDF, Word)</label>
-      <input type="file" accept=".pdf,.doc,.docx" onChange={handleFile}
-        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 mb-3"/>
-      <Inp label="Nome visualizzato" value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Es. Consuntivo 2024.pdf"/>
-      <Sel label="Categoria" value={f.cat} onChange={e=>s("cat",e.target.value)}>{Object.entries(CAT_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</Sel>
-      <Inp label="Anno" type="number" value={f.year} onChange={e=>s("year",Number(e.target.value))}/>
+      <div className="mb-3">
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Seleziona file *</label>
+        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx"
+          onChange={handleFile}
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none"/>
+        {file && <p className="text-xs text-emerald-600 mt-1">✓ {file.name} ({(file.size/1024).toFixed(0)} KB)</p>}
+      </div>
+      <div className="mb-3">
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Nome visualizzato</label>
+        <input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Es. Consuntivo 2024.pdf"
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+      </div>
+      <Sel label="Categoria" value={cat} onChange={e=>setCat(e.target.value)}>{Object.entries(CAT_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</Sel>
+      <div className="mb-3">
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Anno</label>
+        <input type="number" value={anno} onChange={e=>setAnno(Number(e.target.value))}
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+      </div>
       <div className="flex justify-end gap-3 pt-2">
         <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
-        <Btn onClick={handleSave} disabled={!file||uploading}>{uploading?"Caricamento...":"⬆ Carica"}</Btn>
+        <Btn onClick={handleSave} disabled={!file||uploading}>{uploading?"Caricamento...":"⬆ Carica file"}</Btn>
       </div>
     </Modal>
   );
