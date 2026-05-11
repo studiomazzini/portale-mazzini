@@ -451,7 +451,14 @@ function AdminUtenti({tok}) {
       setModal(null); load();
     }catch(e){alert(e.message);}
   };
-  const remove=async id=>{ if(window.confirm("Eliminare?")){ try{await DEL("profiles",`id=eq.${id}`,tok); load();}catch(e){alert(e.message);} } };
+  const remove=async id=>{
+    if(!window.confirm("Eliminare questo utente e tutti i suoi dati (documenti, inquilini, catastali, segnalazioni)?")) return;
+    try{
+      await DEL("segnalazioni",`user_id=eq.${id}`,tok);
+      await sb(`/auth/v1/admin/users/${id}`,{method:"DELETE",svc:true});
+      load();
+    }catch(e){alert(e.message);}
+  };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
