@@ -181,7 +181,73 @@ function useData(fn, deps=[]) {
   return {data,loading,err,reload:load};
 }
 
-// ── Cookie Banner ─────────────────────────────────────────────────────────────
+// ── Cambio Password Obbligatorio ──────────────────────────────────────────────
+function CambioPassword({user, onComplete}) {
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [show, setShow] = useState(false);
+
+  const submit = async () => {
+    setErr("");
+    if (pwd.length < 8) { setErr("La password deve essere di almeno 8 caratteri."); return; }
+    if (pwd !== pwd2) { setErr("Le password non coincidono."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch(`${SB_URL}/auth/v1/user`, {
+        method: "PUT",
+        headers: { "Content-Type":"application/json", "apikey":SB_KEY, "Authorization":`Bearer ${user.token}` },
+        body: JSON.stringify({ password: pwd })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || "Errore aggiornamento password");
+      await PATCH("profiles", `id=eq.${user.id}`, { primo_accesso: false }, user.token);
+      onComplete();
+    } catch(e) { setErr(e.message); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+            <span className="text-white text-3xl">🔑</span>
+          </div>
+          <h1 className="text-2xl font-black text-white">Cambio password</h1>
+          <p className="text-blue-200 text-sm mt-1">Obbligatorio al primo accesso</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5">
+            <p className="text-sm text-amber-800">Benvenuto <strong>{user.name}</strong>! Per garantire la sicurezza del tuo account devi impostare una password personale prima di continuare.</p>
+          </div>
+          <div className="relative mb-3">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Nuova password</label>
+            <input type={show?"text":"password"} value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}}
+              placeholder="Minimo 8 caratteri"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 pr-20"/>
+            <button type="button" onClick={()=>setShow(v=>!v)} className="absolute right-3 top-7 text-gray-400 text-xs">{show?"Nascondi":"Mostra"}</button>
+          </div>
+          <div className="mb-3">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Conferma password</label>
+            <input type={show?"text":"password"} value={pwd2} onChange={e=>{setPwd2(e.target.value);setErr("");}}
+              placeholder="Ripeti la password"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+          </div>
+          {pwd.length>0&&pwd.length<8&&<p className="text-xs text-amber-600 mb-2">Ancora {8-pwd.length} caratteri</p>}
+          {pwd.length>=8&&pwd===pwd2&&<p className="text-xs text-emerald-600 mb-2">✓ Password valida</p>}
+          <ErrBox msg={err}/>
+          <Btn className="w-full justify-center mt-2" onClick={submit} disabled={loading||pwd.length<8||pwd!==pwd2}>
+            {loading?"Salvataggio...":"Imposta password e accedi →"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function CookieBanner({onAccept}) {
   const [det,setDet]=useState(false);
   return (
@@ -949,19 +1015,26 @@ function CondominoPanel({user,onLogout,view,setView}) {
       ];
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar items={nav} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
+      <Sidebar items={navBase} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
       <div className="flex flex-col flex-1 min-h-screen">
         <div className="flex-1 p-8 overflow-auto">
           <div className="max-w-3xl mx-auto">
+            {isEx&&(
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 mb-4 flex items-center gap-3">
+                <span className="text-xl">ℹ️</span>
+                <p className="text-sm text-amber-700">Sei registrato come <strong>ex condomino</strong>. Hai accesso solo ai tuoi documenti personali.</p>
+              </div>
+            )}
             <div className="bg-white border border-gray-100 rounded-2xl px-5 py-3 mb-6 flex items-center gap-3 shadow-sm">
               <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
               <div><p className="text-sm font-bold text-gray-800">{condo?.nome||"Condominio"}</p><p className="text-xs text-gray-400">{condo?.indirizzo} · {condo?.cap} {condo?.citta} · Int. {user.interno}</p></div>
             </div>
-            {view==="docs"         && <CondDocs user={user}/>}
-            {view==="generali"     && <CondGeneralDocs user={user}/>}
-            {view==="inq"          && <CondInquilini user={user}/>}
-            {view==="cat"          && <CondCatastali user={user}/>}
-            {view==="segnalazioni" && <CondSegnalazioni user={user}/>}
+            {view==="docs"         && <CondDocs user={user} soloPersonali={isEx}/>}
+            {view==="generali"     && !isEx && <CondGeneralDocs user={user}/>}
+            {view==="inq"          && !isEx && <CondInquilini user={user}/>}
+            {view==="cat"          && !isEx && <CondCatastali user={user}/>}
+            {view==="segnalazioni" && !isEx && <CondSegnalazioni user={user}/>}
+            {view==="account"      && <CondAccount user={user} onLogout={onLogout}/>}
           </div>
         </div>
         <ContactFooter c={contattiArr?.[0]}/>
@@ -970,8 +1043,8 @@ function CondominoPanel({user,onLogout,view,setView}) {
   );
 }
 
-function CondDocs({user}) {
-  const [sezione,setSezione]=useState("cond"); const [tab,setTab]=useState("consuntivi");
+function CondDocs({user, soloPersonali=false}) {
+  const [sezione,setSezione]=useState(soloPersonali?"personal":"cond"); const [tab,setTab]=useState("consuntivi");
   const {data:docs,loading}=useData(()=>
     sezione==="cond"
       ? GET("docs",`cond_id=eq.${user.cond_id}&cat=eq.${tab}&select=*&order=uploaded_at.desc`,user.token)
@@ -1197,7 +1270,14 @@ export default function App() {
   },[]);
 
   const acceptCookie=()=>{ localStorage.setItem("cookie_consent_v1","accepted"); setCookieOk(true); };
-  const handleLogin=async u=>{ try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role}));}catch{} setUser(u); setView(u.role==="admin"?"condominii":"docs"); };
+  const handleLogin=async u=>{
+    try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role}));}catch{}
+    setUser(u);
+    setView(u.role==="admin"?"condominii":"docs");
+  };
+  const handlePasswordChanged=()=>{
+    setUser(u=>({...u,primo_accesso:false}));
+  };
   const handleLogout=async()=>{ try{await sb("/auth/v1/logout",{method:"POST",token:user.token});}catch{} localStorage.removeItem("sb_session_v1"); setUser(null); };
 
   if(checking) return <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-300 border-t-white rounded-full animate-spin"/></div>;
@@ -1205,8 +1285,9 @@ export default function App() {
   return (
     <>
       {!user && <Login onLogin={handleLogin}/>}
+      {user && user.role!=="admin" && user.primo_accesso && <CambioPassword user={user} onComplete={handlePasswordChanged}/>}
       {user && user.role==="admin" && <AdminPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>}
-      {user && user.role!=="admin" && <CondominoPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>}
+      {user && user.role!=="admin" && !user.primo_accesso && <CondominoPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>}
       {!cookieOk && <CookieBanner onAccept={acceptCookie}/>}
     </>
   );
