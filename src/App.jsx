@@ -356,6 +356,18 @@ function AdminPanel({user,onLogout,view,setView}) {
 }
 
 // ── Admin Condomìni ───────────────────────────────────────────────────────────
+function CondominioModal({mode,data,onSave,onClose}) {
+  const [f,setF]=useState(data); const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return (
+    <Modal title={mode==="add"?"Nuovo Condominio":"Modifica Condominio"} onClose={onClose}>
+      <Inp label="Nome" value={f.nome} onChange={e=>s("nome",e.target.value)} placeholder="Es. Cond. Via Parma 5"/>
+      <Inp label="Indirizzo" value={f.indirizzo} onChange={e=>s("indirizzo",e.target.value)}/>
+      <div className="flex gap-3"><div style={{width:"38%"}}><Inp label="CAP" value={f.cap} onChange={e=>s("cap",e.target.value)}/></div><div className="flex-1"><Inp label="Città" value={f.citta} onChange={e=>s("citta",e.target.value)}/></div></div>
+      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)} disabled={!f.nome}>Salva</Btn></div>
+    </Modal>
+  );
+}
+
 function AdminCondominii({tok}) {
   const {data:list,loading,err,reload}=useData(()=>GET("condominii","select=*&order=nome",tok),[tok]);
   const [modal,setModal]=useState(null);
@@ -382,19 +394,29 @@ function AdminCondominii({tok}) {
           </div>
         ))}
       </div>
-      {modal&&<Modal title={modal.mode==="add"?"Nuovo Condominio":"Modifica"} onClose={()=>setModal(null)}>
-        {(()=>{const [f,setF]=useState(modal.data); const s=(k,v)=>setF(p=>({...p,[k]:v})); return(<>
-          <Inp label="Nome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
-          <Inp label="Indirizzo" value={f.indirizzo} onChange={e=>s("indirizzo",e.target.value)}/>
-          <div className="flex gap-3"><div style={{width:"38%"}}><Inp label="CAP" value={f.cap} onChange={e=>s("cap",e.target.value)}/></div><div className="flex-1"><Inp label="Città" value={f.citta} onChange={e=>s("citta",e.target.value)}/></div></div>
-          <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={()=>setModal(null)}>Annulla</Btn><Btn onClick={()=>f.nome&&save(f)}>Salva</Btn></div>
-        </>);})()}
-      </Modal>}
+      {modal&&<CondominioModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
 
 // ── Admin Utenti ──────────────────────────────────────────────────────────────
+function UtenteModal({mode,data,condominii,onSave,onClose}) {
+  const [f,setF]=useState(data); const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return (
+    <Modal title={mode==="add"?"Nuovo Utente":"Modifica Utente"} onClose={onClose}>
+      <Inp label="Nome e Cognome" value={f.name} onChange={e=>s("name",e.target.value)}/>
+      {mode==="add"&&<><Inp label="Email (opzionale)" type="email" value={f.email} onChange={e=>s("email",e.target.value)} hint="Lascia vuoto se senza email"/><Inp label="Password" value={f.pwd} onChange={e=>s("pwd",e.target.value)}/></>}
+      {mode==="edit"&&<Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>}
+      <Sel label="Condominio" value={f.cond_id} onChange={e=>s("cond_id",e.target.value)}>
+        <option value="">— Seleziona —</option>
+        {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+      </Sel>
+      <div className="flex gap-3"><div className="flex-1"><Inp label="Civico" value={f.scala} onChange={e=>s("scala",e.target.value)}/></div><div className="flex-1"><Inp label="Interno" value={f.interno} onChange={e=>s("interno",e.target.value)}/></div></div>
+      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.name&&onSave(f)}>Salva</Btn></div>
+    </Modal>
+  );
+}
+
 function AdminUtenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
@@ -460,19 +482,7 @@ function AdminUtenti({tok}) {
           <Btn variant="secondary" onClick={()=>setPage(p=>p+1)} disabled={!hasMore}>Succ →</Btn>
         </div>
       </div>
-      {modal&&<Modal title={modal.mode==="add"?"Nuovo Utente":"Modifica Utente"} onClose={()=>setModal(null)}>
-        {(()=>{const [f,setF]=useState(modal.data); const s=(k,v)=>setF(p=>({...p,[k]:v})); return(<>
-          <Inp label="Nome e Cognome" value={f.name} onChange={e=>s("name",e.target.value)}/>
-          {modal.mode==="add"&&<><Inp label="Email (opzionale)" type="email" value={f.email} onChange={e=>s("email",e.target.value)} hint="Lascia vuoto se senza email"/><Inp label="Password" value={f.pwd} onChange={e=>s("pwd",e.target.value)}/></>}
-          {modal.mode==="edit"&&<Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>}
-          <Sel label="Condominio" value={f.cond_id} onChange={e=>s("cond_id",e.target.value)}>
-            <option value="">— Seleziona —</option>
-            {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
-          </Sel>
-          <div className="flex gap-3"><div className="flex-1"><Inp label="Civico" value={f.scala} onChange={e=>s("scala",e.target.value)}/></div><div className="flex-1"><Inp label="Interno" value={f.interno} onChange={e=>s("interno",e.target.value)}/></div></div>
-          <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={()=>setModal(null)}>Annulla</Btn><Btn onClick={()=>f.name&&save(f)}>Salva</Btn></div>
-        </>);})()}
-      </Modal>}
+      {modal&&<UtenteModal mode={modal.mode} data={modal.data} condominii={condominii||[]} onSave={save} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
@@ -631,15 +641,7 @@ function AdminInquilini({tok}) {
           </div>
         ))}
       </div>
-      {modal&&<Modal title={modal.mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={()=>setModal(null)}>
-        {(()=>{const [f,setF]=useState(modal.data); const s=(k,v)=>setF(p=>({...p,[k]:v})); return(<>
-          <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
-          <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
-          <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
-          <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
-          <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={()=>setModal(null)}>Annulla</Btn><Btn onClick={()=>f.nome&&save(f)}>Salva</Btn></div>
-        </>);})()}
-      </Modal>}
+      {modal&&<InqModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
       {docModal&&<DocModal onSave={addDoc} onClose={()=>setDocModal(null)} bucket="docs-personali" pathPrefix={docModal.userId} tok={tok}/>}
     </div>
   );
@@ -932,6 +934,19 @@ function CondGeneralDocs({user}) {
         ))}
       </div>
     </div>
+  );
+}
+
+function InqModal({mode,data,onSave,onClose}) {
+  const [f,setF]=useState(data); const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return (
+    <Modal title={mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={onClose}>
+      <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
+      <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
+      <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
+      <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
+      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)}>Salva</Btn></div>
+    </Modal>
   );
 }
 
