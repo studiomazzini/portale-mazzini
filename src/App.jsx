@@ -54,8 +54,13 @@ async function getSignedUrl(bucket, filePath, token) {
 
 // ── Email ─────────────────────────────────────────────────────────────────────
 const MAIL_FROM = "Portale Condominiale <portale@studiomazzinibo.com>";
-const sendEmail = async(to,subject,html) => {
-  await fetch("https://api.resend.com/emails",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${RS_KEY}`},body:JSON.stringify({from:MAIL_FROM,to,subject,html})});
+const sendEmail = async(to, subject, html) => {
+  const r = await fetch("/.netlify/functions/send-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, subject, html })
+  });
+  if (!r.ok) throw new Error("Errore invio email");
 };
 const mailFooter = `<p style="color:#64748b;font-size:12px;margin-top:16px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.<br><a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>`;
 const catText = c => ({consuntivi:"un nuovo consuntivo",preventivi:"un nuovo preventivo con piano rate",verbali:"un nuovo verbale di assemblea",altro:"un nuovo documento"}[c]||"un nuovo documento");
