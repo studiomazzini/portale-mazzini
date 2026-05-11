@@ -161,6 +161,9 @@ const CAT_COLORS = {consuntivi:"bg-blue-50 text-blue-700",preventivi:"bg-green-5
 const STATO_COLORS = {aperta:"bg-red-100 text-red-700",in_lavorazione:"bg-amber-100 text-amber-700",chiusa:"bg-emerald-100 text-emerald-700"};
 const STATO_LABELS = {aperta:"Aperta","in_lavorazione":"In lavorazione",chiusa:"Chiusa"};
 const Badge = ({cat}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CAT_COLORS[cat]}`}>{CAT_LABELS[cat]}</span>;
+const STATO_UTENTE_COLORS = {attivo:"bg-emerald-100 text-emerald-700",ex_condomino:"bg-amber-100 text-amber-700",disattivato:"bg-gray-100 text-gray-500"};
+const STATO_UTENTE_LABELS = {attivo:"Attivo",ex_condomino:"Ex condomino",disattivato:"Disattivato"};
+const StatoUtente = ({s}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATO_UTENTE_COLORS[s]||"bg-gray-100 text-gray-500"}`}>{STATO_UTENTE_LABELS[s]||s}</span>;
 const StatoBadge = ({s}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATO_COLORS[s]||"bg-gray-100 text-gray-600"}`}>{STATO_LABELS[s]||s}</span>;
 const EmptyState = ({icon,text}) => <div className="py-12 text-center"><div className="text-4xl mb-3">{icon}</div><p className="text-gray-400 text-sm">{text}</p></div>;
 const Spinner = () => <div className="py-12 flex justify-center"><div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"/></div>;
@@ -260,6 +263,10 @@ function Login({onLogin}) {
       const auth=await sb("/auth/v1/token?grant_type=password",{method:"POST",body:{email,password:pwd}});
       const profiles=await GET("profiles",`id=eq.${auth.user.id}&select=*,condominii(*)`,auth.access_token);
       if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
+      if(profiles[0].stato==="disattivato"){
+        await sb("/auth/v1/logout",{method:"POST",token:auth.access_token});
+        throw new Error("Il tuo account è stato disattivato. Contatta lo studio per riattivarlo.");
+      }
       onLogin({token:auth.access_token,...profiles[0],email:auth.user.email});
     }catch(e){setErr(e.message);}
     setLoading(false);
@@ -376,7 +383,18 @@ function CondominioModal({mode,data,onSave,onClose}) {
 function AdminCondominii({tok}) {
   const {data:list,loading,err,reload}=useData(()=>GET("condominii","select=*&order=nome",tok),[tok]);
   const [modal,setModal]=useState(null);
-  const save=async f=>{ try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
+  const makeExCondomino=async id=>{
+    if(!window.confirm("Rimuovere dal condominio? L'utente potrà ancora accedere ai suoi documenti personali ma non a quelli condominiali, e non riceverà più notifiche.")) return;
+    try{await PATCH("profiles",`id=eq.${id}`,{stato:"ex_condomino"},tok); load();}catch(e){alert(e.message);}
+  };
+  const reattiva=async id=>{
+    if(!window.confirm("Riattivare questo utente?")) return;
+    try{await PATCH("profiles",`id=eq.${id}`,{stato:"attivo"},tok); load();}catch(e){alert(e.message);}
+  };
+  const remove=async id=>{
+    if(!window.confirm("ELIMINARE DEFINITIVAMENTE questo utente e tutti i suoi dati? Operazione irreversibile.")) return;
+    try{await DEL("segnalazioni",`user_id=eq.${id}`,tok); await sb(`/auth/v1/admin/users/${id}`,{method:"DELETE",svc:true}); load();}catch(e){alert(e.message);}
+  }; try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("condominii",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
@@ -478,10 +496,15 @@ function AdminUtenti({tok}) {
           <div key={u.id} className={`flex items-center justify-between p-4 ${i<users.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-sm">{u.name?.charAt(0)}</div>
-              <div><p className="font-semibold text-gray-800 text-sm">{u.name}</p><p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p></div>
+              <div>
+                <div className="flex items-center gap-2"><p className="font-semibold text-gray-800 text-sm">{u.name}</p><StatoUtente s={u.stato}/></div>
+                <p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p>
+              </div>
             </div>
             <div className="flex gap-2">
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
+              {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeExCondomino(u.id)}>Ex-Condomino</Btn>}
+              {(u.stato==="ex_condomino"||u.stato==="disattivato")&&<Btn variant="success" onClick={()=>reattiva(u.id)}>Riattiva</Btn>}
               <Btn variant="danger" onClick={()=>remove(u.id)}>Elimina</Btn>
             </div>
           </div>
@@ -863,17 +886,67 @@ function AdminContatti({tok}) {
   );
 }
 
+// ── Condomino Account ─────────────────────────────────────────────────────────
+function CondAccount({user,onLogout}) {
+  const [loading,setLoading]=useState(false);
+  const deactivate=async()=>{
+    if(!window.confirm("Sei sicuro di voler disattivare il tuo account?\n\nI tuoi documenti personali verranno eliminati definitivamente.\nI tuoi dati di contatto rimarranno nel sistema.\nPotrai chiedere la riattivazione contattando lo studio.")) return;
+    setLoading(true);
+    try{
+      await DEL("personal_docs",`user_id=eq.${user.id}`,user.token);
+      await PATCH("profiles",`id=eq.${user.id}`,{stato:"disattivato"},user.token);
+      const contatti=(await GET("contatti","id=eq.1",user.token))?.[0];
+      if(contatti?.email){
+        await sendEmail([contatti.email],
+          `⚠️ Disattivazione account — ${user.name} — ${user.condominii?.nome}`,
+          `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+            <h2 style="color:#e53e3e">Disattivazione Account</h2>
+            <p>Il condomino <strong>${user.name}</strong> ha disattivato il proprio account.</p>
+            <p><strong>Condominio:</strong> ${user.condominii?.nome} · Int. ${user.interno}</p>
+            <p><strong>Email:</strong> ${user.email||"—"}</p>
+            <p>I documenti personali sono stati eliminati. Puoi riattivare l'account dal pannello Gestione Utenti.</p>
+            ${mailFooter}
+          </div>`
+        );
+      }
+      onLogout();
+    }catch(e){alert(e.message);}
+    setLoading(false);
+  };
+  return (
+    <div>
+      <h2 className="text-2xl font-black text-gray-800 mb-2">Il mio account</h2>
+      <p className="text-gray-400 text-sm mb-6">Gestisci le impostazioni del tuo profilo.</p>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+        <h3 className="font-bold text-gray-700 mb-1">Dati profilo</h3>
+        <p className="text-sm text-gray-600">Nome: <strong>{user.name}</strong></p>
+        <p className="text-sm text-gray-600">Email: <strong>{user.email||"—"}</strong></p>
+        <p className="text-sm text-gray-600">Condominio: <strong>{user.condominii?.nome}</strong> · Int. {user.interno}</p>
+      </div>
+      <div className="bg-red-50 border border-red-100 rounded-2xl p-6">
+        <h3 className="font-bold text-red-700 mb-2">⚠️ Zona pericolosa</h3>
+        <p className="text-sm text-red-600 mb-4">Disattivando il tuo account i tuoi <strong>documenti personali verranno eliminati</strong>. I tuoi dati di contatto rimarranno nel sistema e potrai essere riattivato dall'amministratore.</p>
+        <Btn variant="danger" onClick={deactivate} disabled={loading}>{loading?"Disattivazione...":"Disattiva il mio account"}</Btn>
+      </div>
+    </div>
+  );
+}
+
 // ── Condomino ─────────────────────────────────────────────────────────────────
 function CondominoPanel({user,onLogout,view,setView}) {
   const {data:contattiArr}=useData(()=>GET("contatti","id=eq.1",user.token),[user.token]);
   const condo=user.condominii;
-  const nav=[
-    {id:"docs",         label:"Documenti",      icon:"📄"},
-    {id:"generali",     label:"Doc. Generali",  icon:"📋"},
-    {id:"inq",          label:"Inquilini",       icon:"🏠"},
-    {id:"cat",          label:"Dati Catastali",  icon:"📊"},
-    {id:"segnalazioni", label:"Segnalazioni",    icon:"🚨"},
-  ];
+  const isEx = user.stato==="ex_condomino";
+  const navBase = isEx
+    ? [{id:"docs",label:"Documenti",icon:"📄"},{id:"account",label:"Il mio account",icon:"⚙️"}]
+    : [
+        {id:"docs",         label:"Documenti",     icon:"📄"},
+        {id:"generali",     label:"Doc. Generali", icon:"📋"},
+        {id:"inq",          label:"Inquilini",      icon:"🏠"},
+        {id:"cat",          label:"Dati Catastali", icon:"📊"},
+        {id:"segnalazioni", label:"Segnalazioni",   icon:"🚨"},
+        {id:"account",      label:"Il mio account", icon:"⚙️"},
+      ];
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar items={nav} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
