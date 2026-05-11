@@ -710,18 +710,27 @@ function AdminDocumenti({tok}) {
 
 // ── Admin Documenti Generali ──────────────────────────────────────────────────
 function AdminGeneralDocs({tok}) {
-  const {data:docs,loading,reload}=useData(()=>GET("general_docs","select=*&order=uploaded_at.desc",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const [selCond,setSelCond]=useState("");
   const [modal,setModal]=useState(false);
-  const addDoc=async f=>{ try{await POST("general_docs",f,tok); setModal(false); reload();}catch(e){alert(e.message);} };
+  useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+  const qs = selCond ? `cond_id=eq.${selCond}&select=*&order=uploaded_at.desc` : "select=*&order=uploaded_at.desc";
+  const {data:docs,loading,reload}=useData(()=>GET("general_docs",qs,tok),[tok,selCond]);
+  const addDoc=async f=>{ try{await POST("general_docs",{...f,cond_id:Number(selCond)},tok); setModal(false); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("general_docs",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div><h2 className="text-2xl font-black text-gray-800">Documenti Generali</h2><p className="text-gray-400 text-sm mt-0.5">Documenti visibili a tutti i condomini di tutti gli stabili.</p></div>
-        <Btn onClick={()=>setModal(true)}>+ Carica documento</Btn>
+        <div><h2 className="text-2xl font-black text-gray-800">Documenti Generali</h2><p className="text-gray-400 text-sm mt-0.5">Documenti visibili a tutti i condomini dello stabile selezionato.</p></div>
+        <Btn onClick={()=>setModal(true)} disabled={!selCond}>+ Carica documento</Btn>
+      </div>
+      <div className="mb-5">
+        <Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>
+          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
+        </Sel>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading?<Spinner/>:!docs?.length?<EmptyState icon="📋" text="Nessun documento generale."/>:docs.map((d,i)=>(
+        {loading?<Spinner/>:!docs?.length?<EmptyState icon="📋" text="Nessun documento generale per questo condominio."/>:docs.map((d,i)=>(
           <div key={d.id} className={`flex items-center justify-between p-4 ${i<docs.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-lg">📋</div>
@@ -731,7 +740,7 @@ function AdminGeneralDocs({tok}) {
           </div>
         ))}
       </div>
-      {modal&&<DocModal onSave={addDoc} onClose={()=>setModal(false)} bucket="docs-generali" pathPrefix="studio" tok={tok}/>}
+      {modal&&<DocModal onSave={addDoc} onClose={()=>setModal(false)} bucket="docs-generali" pathPrefix={selCond} tok={tok}/>}
     </div>
   );
 }
@@ -894,7 +903,7 @@ function CondDocs({user}) {
 
 function CondGeneralDocs({user}) {
   const [tab,setTab]=useState("consuntivi");
-  const {data:docs,loading}=useData(()=>GET("general_docs",`cat=eq.${tab}&select=*&order=uploaded_at.desc`,user.token),[tab,user.token]);
+  const {data:docs,loading}=useData(()=>GET("general_docs",`cond_id=eq.${user.cond_id}&cat=eq.${tab}&select=*&order=uploaded_at.desc`,user.token),[tab,user.token,user.cond_id]);
   const handleDownload=async d=>{
     if(!d.storage_path){alert("File non disponibile."); return;}
     try{ const url=await getSignedUrl("docs-generali",d.storage_path,user.token); window.open(url,"_blank"); }
