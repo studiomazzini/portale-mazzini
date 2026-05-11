@@ -54,21 +54,22 @@ async function getSignedUrl(bucket, filePath, token) {
 
 // ── Email ─────────────────────────────────────────────────────────────────────
 const MAIL_FROM = "Portale Condominiale <portale@studiomazzinibo.com>";
-const sendEmail = async(to, subject, html) => {
-  const r = await fetch("/.netlify/functions/send-email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, subject, html })
-  });
-  if (!r.ok) throw new Error("Errore invio email");
-};
 const mailFooter = `<p style="color:#64748b;font-size:12px;margin-top:16px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.<br><a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>`;
+
+const sendEmail = async(to,subject,html) => {
+  const r = await fetch("/.netlify/functions/send-email",{
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({to,subject,html})
+  });
+  if(!r.ok) throw new Error("Errore invio email");
+};
+
 const catText = c => ({consuntivi:"un nuovo consuntivo",preventivi:"un nuovo preventivo con piano rate",verbali:"un nuovo verbale di assemblea",altro:"un nuovo documento"}[c]||"un nuovo documento");
 
 async function notifyCondoDoc(condId, docName, cat, tok) {
-  try {
-    const users = await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=name,email`,tok);
-    const condo = (await GET("condominii",`id=eq.${condId}&select=nome`,tok))?.[0];
+  try{
+    const users=await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&stato=eq.attivo&select=name,email`,tok);
+    const condo=(await GET("condominii",`id=eq.${condId}&select=nome`,tok))?.[0];
     for(const u of users||[]){
       if(!isRealEmail(u.email)) continue;
       await sendEmail([u.email],`${condo?.nome} — Nuovo documento disponibile`,
@@ -81,9 +82,10 @@ async function notifyCondoDoc(condId, docName, cat, tok) {
     }
   }catch(e){console.error("Notifica errore:",e);}
 }
+
 async function notifyPersonalDoc(userId, docName, cat, tok) {
-  try {
-    const u = (await GET("profiles",`id=eq.${userId}&select=name,email`,tok))?.[0];
+  try{
+    const u=(await GET("profiles",`id=eq.${userId}&select=name,email`,tok))?.[0];
     if(!isRealEmail(u?.email)) return;
     await sendEmail([u.email],"Nuovo documento personale disponibile",
       `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
@@ -94,9 +96,10 @@ async function notifyPersonalDoc(userId, docName, cat, tok) {
         ${mailFooter}</div>`);
   }catch(e){console.error("Notifica errore:",e);}
 }
+
 async function notifySegnalazione(segn, userName, condoNome, interno, adminEmail) {
   if(!adminEmail) return;
-  try {
+  try{
     const col = segn.urgenza==="urgente"?"#e53e3e":"#2d3748";
     await sendEmail([adminEmail],`🚨 Nuova segnalazione — ${userName} — ${condoNome}`,
       `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
@@ -112,6 +115,7 @@ async function notifySegnalazione(segn, userName, condoNome, interno, adminEmail
       </div>`);
   }catch(e){console.error("Notifica errore:",e);}
 }
+
 async function sendWelcomeEmail(email, nome, password, condoNome) {
   await sendEmail([email],"Le tue credenziali di accesso al Portale Condominiale",
     `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
@@ -141,7 +145,7 @@ const Sel = ({label,children,...p}) => (
   </div>
 );
 const Btn = ({children,variant="primary",className="",...p}) => {
-  const v={primary:"bg-blue-600 hover:bg-blue-700 text-white shadow-sm",secondary:"bg-white hover:bg-gray-50 text-gray-700 border border-gray-200",danger:"bg-red-500 hover:bg-red-600 text-white shadow-sm",success:"bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm",ghost:"hover:bg-gray-100 text-gray-500",warning:"bg-amber-500 hover:bg-amber-600 text-white shadow-sm"}[variant]||"";
+  const v={primary:"bg-blue-600 hover:bg-blue-700 text-white shadow-sm",secondary:"bg-white hover:bg-gray-50 text-gray-700 border border-gray-200",danger:"bg-red-500 hover:bg-red-600 text-white shadow-sm",success:"bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm",warning:"bg-amber-500 hover:bg-amber-600 text-white shadow-sm",ghost:"hover:bg-gray-100 text-gray-500"}[variant]||"";
   return <button className={`${v} px-4 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${className}`} {...p}>{children}</button>;
 };
 const Modal = ({title,children,onClose}) => (
@@ -159,12 +163,12 @@ const CAT_LABELS = {consuntivi:"Consuntivi",preventivi:"Preventivi & Rate",verba
 const CAT_ICONS  = {consuntivi:"📊",preventivi:"💶",verbali:"📋",altro:"📎"};
 const CAT_COLORS = {consuntivi:"bg-blue-50 text-blue-700",preventivi:"bg-green-50 text-green-700",verbali:"bg-purple-50 text-purple-700",altro:"bg-gray-100 text-gray-600"};
 const STATO_COLORS = {aperta:"bg-red-100 text-red-700",in_lavorazione:"bg-amber-100 text-amber-700",chiusa:"bg-emerald-100 text-emerald-700"};
-const STATO_LABELS = {aperta:"Aperta","in_lavorazione":"In lavorazione",chiusa:"Chiusa"};
+const STATO_LABELS = {aperta:"Aperta",in_lavorazione:"In lavorazione",chiusa:"Chiusa"};
+const STATO_U_COLORS = {attivo:"bg-emerald-100 text-emerald-700",ex_condomino:"bg-amber-100 text-amber-700",disattivato:"bg-gray-100 text-gray-500"};
+const STATO_U_LABELS = {attivo:"Attivo",ex_condomino:"Ex condomino",disattivato:"Disattivato"};
 const Badge = ({cat}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CAT_COLORS[cat]}`}>{CAT_LABELS[cat]}</span>;
-const STATO_UTENTE_COLORS = {attivo:"bg-emerald-100 text-emerald-700",ex_condomino:"bg-amber-100 text-amber-700",disattivato:"bg-gray-100 text-gray-500"};
-const STATO_UTENTE_LABELS = {attivo:"Attivo",ex_condomino:"Ex condomino",disattivato:"Disattivato"};
-const StatoUtente = ({s}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATO_UTENTE_COLORS[s]||"bg-gray-100 text-gray-500"}`}>{STATO_UTENTE_LABELS[s]||s}</span>;
 const StatoBadge = ({s}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATO_COLORS[s]||"bg-gray-100 text-gray-600"}`}>{STATO_LABELS[s]||s}</span>;
+const StatoUtente = ({s}) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATO_U_COLORS[s]||"bg-gray-100 text-gray-500"}`}>{STATO_U_LABELS[s]||s}</span>;
 const EmptyState = ({icon,text}) => <div className="py-12 text-center"><div className="text-4xl mb-3">{icon}</div><p className="text-gray-400 text-sm">{text}</p></div>;
 const Spinner = () => <div className="py-12 flex justify-center"><div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"/></div>;
 const ErrBox = ({msg}) => msg?<div className="bg-red-50 border border-red-100 text-red-600 text-xs rounded-xl px-3 py-2 mb-3">{msg}</div>:null;
@@ -183,38 +187,25 @@ function useData(fn, deps=[]) {
 
 // ── Cambio Password Obbligatorio ──────────────────────────────────────────────
 function CambioPassword({user, onComplete}) {
-  const [pwd, setPwd] = useState("");
-  const [pwd2, setPwd2] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
-  const [show, setShow] = useState(false);
-
-  const submit = async () => {
+  const [pwd,setPwd]=useState(""); const [pwd2,setPwd2]=useState(""); const [loading,setLoading]=useState(false); const [err,setErr]=useState(""); const [show,setShow]=useState(false);
+  const submit=async()=>{
     setErr("");
-    if (pwd.length < 8) { setErr("La password deve essere di almeno 8 caratteri."); return; }
-    if (pwd !== pwd2) { setErr("Le password non coincidono."); return; }
+    if(pwd.length<8){setErr("La password deve essere di almeno 8 caratteri."); return;}
+    if(pwd!==pwd2){setErr("Le password non coincidono."); return;}
     setLoading(true);
-    try {
-      const r = await fetch(`${SB_URL}/auth/v1/user`, {
-        method: "PUT",
-        headers: { "Content-Type":"application/json", "apikey":SB_KEY, "Authorization":`Bearer ${user.token}` },
-        body: JSON.stringify({ password: pwd })
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.message || "Errore aggiornamento password");
-      await PATCH("profiles", `id=eq.${user.id}`, { primo_accesso: false }, user.token);
+    try{
+      const r=await fetch(`${SB_URL}/auth/v1/user`,{method:"PUT",headers:{"Content-Type":"application/json","apikey":SB_KEY,"Authorization":`Bearer ${user.token}`},body:JSON.stringify({password:pwd})});
+      const d=await r.json(); if(!r.ok) throw new Error(d.message||"Errore aggiornamento password");
+      await PATCH("profiles",`id=eq.${user.id}`,{primo_accesso:false},user.token);
       onComplete();
-    } catch(e) { setErr(e.message); }
+    }catch(e){setErr(e.message);}
     setLoading(false);
   };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-white text-3xl">🔑</span>
-          </div>
+          <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg"><span className="text-white text-3xl">🔑</span></div>
           <h1 className="text-2xl font-black text-white">Cambio password</h1>
           <p className="text-blue-200 text-sm mt-1">Obbligatorio al primo accesso</p>
         </div>
@@ -224,51 +215,42 @@ function CambioPassword({user, onComplete}) {
           </div>
           <div className="relative mb-3">
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Nuova password</label>
-            <input type={show?"text":"password"} value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}}
-              placeholder="Minimo 8 caratteri"
+            <input type={show?"text":"password"} value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="Minimo 8 caratteri"
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 pr-20"/>
             <button type="button" onClick={()=>setShow(v=>!v)} className="absolute right-3 top-7 text-gray-400 text-xs">{show?"Nascondi":"Mostra"}</button>
           </div>
           <div className="mb-3">
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Conferma password</label>
-            <input type={show?"text":"password"} value={pwd2} onChange={e=>{setPwd2(e.target.value);setErr("");}}
-              placeholder="Ripeti la password"
+            <input type={show?"text":"password"} value={pwd2} onChange={e=>{setPwd2(e.target.value);setErr("");}} placeholder="Ripeti la password"
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"/>
           </div>
           {pwd.length>0&&pwd.length<8&&<p className="text-xs text-amber-600 mb-2">Ancora {8-pwd.length} caratteri</p>}
           {pwd.length>=8&&pwd===pwd2&&<p className="text-xs text-emerald-600 mb-2">✓ Password valida</p>}
           <ErrBox msg={err}/>
-          <Btn className="w-full justify-center mt-2" onClick={submit} disabled={loading||pwd.length<8||pwd!==pwd2}>
-            {loading?"Salvataggio...":"Imposta password e accedi →"}
-          </Btn>
+          <Btn className="w-full justify-center mt-2" onClick={submit} disabled={loading||pwd.length<8||pwd!==pwd2}>{loading?"Salvataggio...":"Imposta password e accedi →"}</Btn>
         </div>
       </div>
     </div>
   );
 }
 
-
+// ── Cookie Banner ─────────────────────────────────────────────────────────────
 function CookieBanner({onAccept}) {
   const [det,setDet]=useState(false);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 pointer-events-none">
       <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-xl pointer-events-auto">
         <div className="flex items-center gap-3 px-6 pt-5 pb-4 border-b border-gray-100">
-          <div className="w-8 h-8 bg-blue-500 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0">M</div>
+          <div className="w-8 h-8 bg-blue-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">M</div>
           <div><p className="font-bold text-gray-800 text-sm">Studio Mazzini — Portale Condominiale</p><p className="text-xs text-gray-400">Informativa sull'uso dei cookie</p></div>
         </div>
         <div className="px-6 py-4">
-          <p className="text-sm text-gray-600 leading-relaxed">Questo portale utilizza esclusivamente <strong>cookie tecnici strettamente necessari</strong> al funzionamento del servizio: gestione della sessione di autenticazione e sicurezza degli accessi. Non vengono utilizzati cookie di profilazione né strumenti pubblicitari.</p>
-          {det&&(
-            <div className="mt-3 bg-gray-50 rounded-xl p-4 border border-gray-100 text-xs text-gray-600 space-y-2">
-              <p>✓ <strong>Token di sessione (JWT):</strong> mantiene l'utente autenticato — Durata: sessione/24h — Non richiede consenso</p>
-              <p>✓ <strong>Cookie di sicurezza (CSRF):</strong> protegge da attacchi informatici — Durata: sessione — Non richiede consenso</p>
-            </div>
-          )}
-          <button onClick={()=>setDet(v=>!v)} className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium">{det?"▲ Nascondi dettagli":"▼ Mostra dettagli cookie"}</button>
+          <p className="text-sm text-gray-600">Questo portale utilizza esclusivamente <strong>cookie tecnici strettamente necessari</strong> al funzionamento del servizio. Non vengono utilizzati cookie di profilazione né strumenti pubblicitari.</p>
+          {det&&<div className="mt-3 bg-gray-50 rounded-xl p-4 border border-gray-100 text-xs text-gray-600 space-y-2"><p>✓ <strong>Token di sessione (JWT):</strong> autenticazione — Non richiede consenso</p><p>✓ <strong>Cookie di sicurezza (CSRF):</strong> protezione — Non richiede consenso</p></div>}
+          <button onClick={()=>setDet(v=>!v)} className="mt-2 text-xs text-blue-600 font-medium">{det?"▲ Nascondi":"▼ Mostra dettagli"}</button>
         </div>
         <div className="px-6 pb-5 flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs text-gray-400 flex-1">Utilizzando il portale accetti l'uso dei cookie tecnici ai sensi dell'art. 122, comma 1, D.Lgs. 196/2003.</p>
+          <p className="text-xs text-gray-400 flex-1">Utilizzando il portale accetti l'uso dei cookie tecnici.</p>
           <Btn onClick={onAccept}>Accetta e continua →</Btn>
         </div>
       </div>
@@ -281,10 +263,7 @@ function ContactFooter({c}) {
   if(!c) return null;
   return (
     <div className="bg-white border-t border-gray-200 px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-      <div className="flex items-center gap-2">
-        <div className="w-6 h-6 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-xs">M</div>
-        <span className="text-xs font-semibold text-gray-700">{c.nome}</span>
-      </div>
+      <div className="flex items-center gap-2"><div className="w-6 h-6 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-xs">M</div><span className="text-xs font-semibold text-gray-700">{c.nome}</span></div>
       {c.telefono&&<a href={`tel:${c.telefono}`} className="text-xs text-gray-500 hover:text-blue-600 transition">📞 {c.telefono}</a>}
       {c.email&&<a href={`mailto:${c.email}`} className="text-xs text-gray-500 hover:text-blue-600 transition">✉️ {c.email}</a>}
       {c.indirizzo&&<span className="text-xs text-gray-400">📍 {c.indirizzo}</span>}
@@ -305,8 +284,7 @@ function Sidebar({items,active,onSelect,user,onLogout}) {
       </div>
       <nav className="flex-1 p-3 space-y-0.5">
         {items.map(({id,label,icon})=>(
-          <button key={id} onClick={()=>onSelect(id)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${active===id?"bg-blue-600 text-white font-medium":"text-slate-400 hover:bg-slate-800 hover:text-white"}`}>
+          <button key={id} onClick={()=>onSelect(id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${active===id?"bg-blue-600 text-white font-medium":"text-slate-400 hover:bg-slate-800 hover:text-white"}`}>
             <span>{icon}</span><span>{label}</span>
           </button>
         ))}
@@ -366,7 +344,7 @@ function Login({onLogin}) {
 function DocModal({onSave,onClose,bucket,pathPrefix,tok}) {
   const [nome,setNome]=useState(""); const [cat,setCat]=useState("consuntivi"); const [anno,setAnno]=useState(new Date().getFullYear());
   const [file,setFile]=useState(null); const [uploading,setUploading]=useState(false);
-  const handleFile=e=>{ const fl=e.target.files[0]; if(!fl) return; setFile(fl); setNome(fl.name); };
+  const handleFile=e=>{const fl=e.target.files[0]; if(!fl) return; setFile(fl); setNome(fl.name);};
   const handleSave=async()=>{
     if(!file){alert("Seleziona un file."); return;} setUploading(true);
     try{
@@ -405,14 +383,14 @@ function DocModal({onSave,onClose,bucket,pathPrefix,tok}) {
 // ── Admin ─────────────────────────────────────────────────────────────────────
 function AdminPanel({user,onLogout,view,setView}) {
   const nav=[
-    {id:"condominii",  label:"Condomìni",      icon:"🏢"},
-    {id:"utenti",      label:"Utenti",          icon:"👥"},
-    {id:"importa",     label:"Importa Excel",   icon:"📥"},
-    {id:"inquilini",   label:"Inquilini",        icon:"🏠"},
-    {id:"documenti",   label:"Documenti",        icon:"📁"},
-    {id:"generali",    label:"Doc. Generali",    icon:"📋"},
-    {id:"segnalazioni",label:"Segnalazioni",     icon:"🚨"},
-    {id:"contatti",    label:"Contatti Studio",  icon:"📞"},
+    {id:"condominii",   label:"Condomìni",       icon:"🏢"},
+    {id:"utenti",       label:"Utenti",           icon:"👥"},
+    {id:"importa",      label:"Importa Excel",    icon:"📥"},
+    {id:"inquilini",    label:"Inquilini",         icon:"🏠"},
+    {id:"documenti",    label:"Documenti",         icon:"📁"},
+    {id:"generali",     label:"Doc. Generali",     icon:"📋"},
+    {id:"segnalazioni", label:"Segnalazioni",      icon:"🚨"},
+    {id:"contatti",     label:"Contatti Studio",   icon:"📞"},
   ];
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -445,22 +423,10 @@ function CondominioModal({mode,data,onSave,onClose}) {
     </Modal>
   );
 }
-
 function AdminCondominii({tok}) {
   const {data:list,loading,err,reload}=useData(()=>GET("condominii","select=*&order=nome",tok),[tok]);
   const [modal,setModal]=useState(null);
-  const makeExCondomino=async id=>{
-    if(!window.confirm("Rimuovere dal condominio? L'utente potrà ancora accedere ai suoi documenti personali ma non a quelli condominiali, e non riceverà più notifiche.")) return;
-    try{await PATCH("profiles",`id=eq.${id}`,{stato:"ex_condomino"},tok); load();}catch(e){alert(e.message);}
-  };
-  const reattiva=async id=>{
-    if(!window.confirm("Riattivare questo utente?")) return;
-    try{await PATCH("profiles",`id=eq.${id}`,{stato:"attivo"},tok); load();}catch(e){alert(e.message);}
-  };
-  const remove=async id=>{
-    if(!window.confirm("ELIMINARE DEFINITIVAMENTE questo utente e tutti i suoi dati? Operazione irreversibile.")) return;
-    try{await DEL("segnalazioni",`user_id=eq.${id}`,tok); await sb(`/auth/v1/admin/users/${id}`,{method:"DELETE",svc:true}); load();}catch(e){alert(e.message);}
-  }; try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
+  const save=async f=>{ try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("condominii",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
@@ -500,16 +466,15 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
         <option value="">— Seleziona —</option>
         {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
       </Sel>
-      <div className="flex gap-3"><div className="flex-1"><Inp label="Civico" value={f.scala} onChange={e=>s("scala",e.target.value)}/></div><div className="flex-1"><Inp label="Interno" value={f.interno} onChange={e=>s("interno",e.target.value)}/></div></div>
+      <div className="flex gap-3"><div className="flex-1"><Inp label="Civico" value={f.scala||""} onChange={e=>s("scala",e.target.value)}/></div><div className="flex-1"><Inp label="Interno" value={f.interno||""} onChange={e=>s("interno",e.target.value)}/></div></div>
       <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.name&&onSave(f)}>Salva</Btn></div>
     </Modal>
   );
 }
-
 function AdminUtenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
-  const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
+  const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(""); const [filterStato,setFilterStato]=useState("attivo"); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
   const [modal,setModal]=useState(null);
   const load=useCallback(async()=>{
     setLoading(true); setErr("");
@@ -517,43 +482,47 @@ function AdminUtenti({tok}) {
       let qs=`role=eq.condomino&select=*,condominii(nome,citta)&order=name&limit=${PS+1}&offset=${page*PS}`;
       if(search) qs+=`&or=(name.ilike.*${encodeURIComponent(search)}*,email.ilike.*${encodeURIComponent(search)}*)`;
       if(filterCond) qs+=`&cond_id=eq.${filterCond}`;
+      if(filterStato) qs+=`&stato=eq.${filterStato}`;
       const d=await GET("profiles",qs,tok);
       setHasMore(d.length>PS); setUsers(d.slice(0,PS));
     }catch(e){setErr(e.message);}
     setLoading(false);
-  },[tok,search,filterCond,page]);
+  },[tok,search,filterCond,filterStato,page]);
   useEffect(()=>{load();},[load]);
-  useEffect(()=>setPage(0),[search,filterCond]);
+  useEffect(()=>setPage(0),[search,filterCond,filterStato]);
+
   const save=async f=>{
     try{
       if(modal.mode==="add"){
-        const {id:uid,email:realEmail}=await createAuthUser(f.email||null,f.pwd);
-        await POST("profiles",{id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null},tok);
+        const {id:uid}=await createAuthUser(f.email||null,f.pwd);
+        await POST("profiles",{id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null,stato:"attivo",primo_accesso:true},tok);
       }else{
         await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:f.email||null},tok);
       }
       setModal(null); load();
     }catch(e){alert(e.message);}
   };
-  const remove=async id=>{
-    if(!window.confirm("Eliminare questo utente e tutti i suoi dati (documenti, inquilini, catastali, segnalazioni)?")) return;
-    try{
-      await DEL("segnalazioni",`user_id=eq.${id}`,tok);
-      await sb(`/auth/v1/admin/users/${id}`,{method:"DELETE",svc:true});
-      load();
-    }catch(e){alert(e.message);}
-  };
+  const makeEx=async id=>{ if(!window.confirm("Rimuovere dal condominio? L'utente potrà ancora accedere ai documenti personali.")) return; try{await PATCH("profiles",`id=eq.${id}`,{stato:"ex_condomino"},tok); load();}catch(e){alert(e.message);} };
+  const reattiva=async id=>{ if(!window.confirm("Riattivare questo utente?")) return; try{await PATCH("profiles",`id=eq.${id}`,{stato:"attivo"},tok); load();}catch(e){alert(e.message);} };
+  const remove=async id=>{ if(!window.confirm("ELIMINARE DEFINITIVAMENTE? Operazione irreversibile.")) return; try{await DEL("segnalazioni",`user_id=eq.${id}`,tok); await sb(`/auth/v1/admin/users/${id}`,{method:"DELETE",svc:true}); load();}catch(e){alert(e.message);} };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div><h2 className="text-2xl font-black text-gray-800">Gestione Utenti</h2></div>
         <Btn onClick={()=>setModal({mode:"add",data:{name:"",email:"",pwd:"",cond_id:condominii?.[0]?.id||"",scala:"",interno:""}})}>+ Nuovo utente</Btn>
       </div>
-      <div className="flex gap-3 mb-4">
+      <div className="flex gap-3 mb-4 flex-wrap">
         <SearchBar value={search} onChange={setSearch} placeholder="Cerca nome o email..."/>
         <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" value={filterCond} onChange={e=>setFilterCond(e.target.value)}>
           <option value="">Tutti i condomìni</option>
           {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+        <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" value={filterStato} onChange={e=>setFilterStato(e.target.value)}>
+          <option value="">Tutti gli stati</option>
+          <option value="attivo">Attivi</option>
+          <option value="ex_condomino">Ex condomini</option>
+          <option value="disattivato">Disattivati</option>
         </select>
       </div>
       <ErrBox msg={err}/>
@@ -567,9 +536,9 @@ function AdminUtenti({tok}) {
                 <p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-end">
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
-              {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeExCondomino(u.id)}>Ex-Condomino</Btn>}
+              {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeEx(u.id)}>Ex-Condomino</Btn>}
               {(u.stato==="ex_condomino"||u.stato==="disattivato")&&<Btn variant="success" onClick={()=>reattiva(u.id)}>Riattiva</Btn>}
               <Btn variant="danger" onClick={()=>remove(u.id)}>Elimina</Btn>
             </div>
@@ -578,10 +547,7 @@ function AdminUtenti({tok}) {
       </div>
       <div className="flex items-center justify-between mt-4">
         <p className="text-xs text-gray-400">Pagina {page+1}</p>
-        <div className="flex gap-2">
-          <Btn variant="secondary" onClick={()=>setPage(p=>p-1)} disabled={page===0}>← Prec</Btn>
-          <Btn variant="secondary" onClick={()=>setPage(p=>p+1)} disabled={!hasMore}>Succ →</Btn>
-        </div>
+        <div className="flex gap-2"><Btn variant="secondary" onClick={()=>setPage(p=>p-1)} disabled={page===0}>← Prec</Btn><Btn variant="secondary" onClick={()=>setPage(p=>p+1)} disabled={!hasMore}>Succ →</Btn></div>
       </div>
       {modal&&<UtenteModal mode={modal.mode} data={modal.data} condominii={condominii||[]} onSave={save} onClose={()=>setModal(null)}/>}
     </div>
@@ -604,8 +570,7 @@ function AdminImport({tok}) {
       const proprietari=data.filter(r=>col(r,["Tipo Cond.","Tipo cond.","TIPO COND."]).toLowerCase()==="proprietario");
       const parsed=proprietari.map(r=>{
         const nUn=col(r,["N. Un.","N.Un.","N Un"]);
-        const inquilini=data.filter(i=>col(i,["Tipo Cond.","Tipo cond."]).toLowerCase()==="inquilino"&&col(i,["N. Un.","N.Un.","N Un"])===nUn)
-          .map(i=>({nome:col(i,["Nome","NOME"]),email:col(i,["Email","EMAIL","email"]),tel:""}));
+        const inquilini=data.filter(i=>col(i,["Tipo Cond.","Tipo cond."]).toLowerCase()==="inquilino"&&col(i,["N. Un.","N.Un.","N Un"])===nUn).map(i=>({nome:col(i,["Nome","NOME"]),email:col(i,["Email","EMAIL","email"]),tel:""}));
         const nomeCompleto=col(r,["Nome","NOME"]);
         const primoToken=nomeCompleto.split(/\s+/)[0]||"Utente";
         const cognome=primoToken.charAt(0).toUpperCase()+primoToken.slice(1).toLowerCase();
@@ -624,7 +589,7 @@ function AdminImport({tok}) {
       const r=rows[i]; setProgress(Math.round(((i+1)/rows.length)*100));
       try{
         const {id:uid,hasRealEmail}=await createAuthUser(r.email||null,r.password);
-        await POST("profiles",{id:uid,name:r.nome,role:"condomino",cond_id:Number(selCond),scala:r.civico,interno:r.interno,email:isRealEmail(r.email)?r.email:null},tok);
+        await POST("profiles",{id:uid,name:r.nome,role:"condomino",cond_id:Number(selCond),scala:r.civico,interno:r.interno,email:isRealEmail(r.email)?r.email:null,stato:"attivo",primo_accesso:true},tok);
         if(r.foglio||r.particella||r.subalterno) await UPS("catastali",{user_id:uid,foglio:r.foglio,particella:r.particella,subalterno:r.subalterno,updated_at:new Date().toISOString()},tok);
         for(const inq of r.inquilini) if(inq.nome) await POST("inquilini",{user_id:uid,nome:inq.nome,email:inq.email,tel:inq.tel},tok);
         if(hasRealEmail&&r.email){ try{await sendWelcomeEmail(r.email,r.nome,r.password,condo?.nome||""); ok.push(r);}catch{noEmail.push(r);} }
@@ -690,6 +655,18 @@ function AdminImport({tok}) {
 }
 
 // ── Admin Inquilini ───────────────────────────────────────────────────────────
+function InqModal({mode,data,onSave,onClose}) {
+  const [f,setF]=useState(data); const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return (
+    <Modal title={mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={onClose}>
+      <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
+      <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
+      <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
+      <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
+      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)}>Salva</Btn></div>
+    </Modal>
+  );
+}
 function AdminInquilini({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(""); const [inqList,setInqList]=useState([]); const [loading,setLoading]=useState(false);
@@ -707,32 +684,20 @@ function AdminInquilini({tok}) {
     }catch(e){console.error(e);}
     setLoading(false);
   };
-  const save=async f=>{
-    try{
-      modal.mode==="add"?await POST("inquilini",f,tok):await PATCH("inquilini",`id=eq.${f.id}`,f,tok);
-      setModal(null); loadInq();
-    }catch(e){alert(e.message);}
-  };
+  const save=async f=>{ try{ modal.mode==="add"?await POST("inquilini",f,tok):await PATCH("inquilini",`id=eq.${f.id}`,f,tok); setModal(null); loadInq(); }catch(e){alert(e.message);} };
   const remove=async id=>{ if(window.confirm("Eliminare?")){ try{await DEL("inquilini",`id=eq.${id}`,tok); loadInq();}catch(e){alert(e.message);} } };
-  const addDoc=async(docData)=>{
-    try{ await POST("personal_docs",{user_id:docModal.userId,...docData},tok); setDocModal(null);}catch(e){alert(e.message);}
-  };
+  const addDoc=async docData=>{ try{await POST("personal_docs",{user_id:docModal.userId,...docData},tok); setDocModal(null);}catch(e){alert(e.message);} };
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div><h2 className="text-2xl font-black text-gray-800">Gestione Inquilini</h2><p className="text-gray-400 text-sm">{inqList.length} inquilino/i nel condominio selezionato</p></div>
-      </div>
-      <div className="mb-4">
-        <Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>{condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}</Sel>
-      </div>
+      <div className="flex items-center justify-between mb-6"><div><h2 className="text-2xl font-black text-gray-800">Gestione Inquilini</h2><p className="text-gray-400 text-sm">{inqList.length} inquilino/i</p></div></div>
+      <div className="mb-4"><Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>{condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}</Sel></div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading?<Spinner/>:!inqList.length?<EmptyState icon="🏠" text="Nessun inquilino in questo condominio."/>:inqList.map((i,idx)=>(
+        {loading?<Spinner/>:!inqList.length?<EmptyState icon="🏠" text="Nessun inquilino."/>:inqList.map((i,idx)=>(
           <div key={i.id} className={`flex items-center justify-between p-4 ${idx<inqList.length-1?"border-b border-gray-50":""}`}>
             <div>
               <p className="font-semibold text-gray-800 text-sm">{i.nome}</p>
               <p className="text-xs text-gray-400">Proprietario: {i.proprietario} · Int.{i.proprietario_interno}</p>
               <p className="text-xs text-gray-400">{i.email}{i.tel?` · ${i.tel}`:""}</p>
-              <p className="text-xs text-gray-400">{i.dal?`Dal ${new Date(i.dal).toLocaleDateString("it-IT")}`:""}{i.al?` al ${new Date(i.al).toLocaleDateString("it-IT")}`:" · (in corso)"}</p>
             </div>
             <div className="flex gap-2">
               <Btn variant="secondary" onClick={()=>setDocModal({userId:i.user_id,nome:i.nome})}>📄 Doc</Btn>
@@ -767,13 +732,8 @@ function AdminDocumenti({tok}) {
   };
   const addDoc=async f=>{
     try{
-      if(tipo==="cond"){
-        await POST("docs",{cond_id:Number(selCond),...f},tok);
-        notifyCondoDoc(selCond,f.name,f.cat,tok);
-      }else{
-        await POST("personal_docs",{user_id:selUid,...f},tok);
-        notifyPersonalDoc(selUid,f.name,f.cat,tok);
-      }
+      if(tipo==="cond"){ await POST("docs",{cond_id:Number(selCond),...f},tok); notifyCondoDoc(selCond,f.name,f.cat,tok); }
+      else{ await POST("personal_docs",{user_id:selUid,...f},tok); notifyPersonalDoc(selUid,f.name,f.cat,tok); }
       setModal(false); loadDocs();
     }catch(e){alert(e.message);}
   };
@@ -811,29 +771,24 @@ function AdminDocumenti({tok}) {
   );
 }
 
-// ── Admin Documenti Generali ──────────────────────────────────────────────────
+// ── Admin Doc. Generali ───────────────────────────────────────────────────────
 function AdminGeneralDocs({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
-  const [selCond,setSelCond]=useState("");
-  const [modal,setModal]=useState(false);
+  const [selCond,setSelCond]=useState(""); const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
-  const qs = selCond ? `cond_id=eq.${selCond}&select=*&order=uploaded_at.desc` : "select=*&order=uploaded_at.desc";
+  const qs=selCond?`cond_id=eq.${selCond}&select=*&order=uploaded_at.desc`:"select=*&order=uploaded_at.desc";
   const {data:docs,loading,reload}=useData(()=>GET("general_docs",qs,tok),[tok,selCond]);
   const addDoc=async f=>{ try{await POST("general_docs",{...f,cond_id:Number(selCond)},tok); setModal(false); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("general_docs",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div><h2 className="text-2xl font-black text-gray-800">Documenti Generali</h2><p className="text-gray-400 text-sm mt-0.5">Documenti visibili a tutti i condomini dello stabile selezionato.</p></div>
+        <div><h2 className="text-2xl font-black text-gray-800">Documenti Generali</h2><p className="text-gray-400 text-sm">Visibili a tutti i condomini dello stabile selezionato.</p></div>
         <Btn onClick={()=>setModal(true)} disabled={!selCond}>+ Carica documento</Btn>
       </div>
-      <div className="mb-5">
-        <Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>
-          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
-        </Sel>
-      </div>
+      <div className="mb-5"><Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>{condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}</Sel></div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading?<Spinner/>:!docs?.length?<EmptyState icon="📋" text="Nessun documento generale per questo condominio."/>:docs.map((d,i)=>(
+        {loading?<Spinner/>:!docs?.length?<EmptyState icon="📋" text="Nessun documento generale."/>:docs.map((d,i)=>(
           <div key={d.id} className={`flex items-center justify-between p-4 ${i<docs.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-lg">📋</div>
@@ -852,9 +807,7 @@ function AdminGeneralDocs({tok}) {
 function AdminSegnalazioni({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome&order=nome",tok),[tok]);
   const [filterStato,setFilterStato]=useState(""); const [filterCond,setFilterCond]=useState("");
-  const [list,setList]=useState([]); const [loading,setLoading]=useState(true);
-  const [expanded,setExpanded]=useState(null);
-
+  const [list,setList]=useState([]); const [loading,setLoading]=useState(true); const [expanded,setExpanded]=useState(null);
   const load=useCallback(async()=>{
     setLoading(true);
     try{
@@ -863,38 +816,25 @@ function AdminSegnalazioni({tok}) {
       if(filterCond) qs+=`&cond_id=eq.${filterCond}`;
       const segn=await GET("segnalazioni",qs,tok)||[];
       if(segn.length){
-        const userIds=[...new Set(segn.map(s=>s.user_id))].join(",");
-        const condIds=[...new Set(segn.map(s=>s.cond_id))].join(",");
-        const [prof,conds]=await Promise.all([
-          GET("profiles",`id=in.(${userIds})&select=id,name,interno`,tok),
-          GET("condominii",`id=in.(${condIds})&select=id,nome`,tok),
-        ]);
-        setList(segn.map(s=>({
-          ...s,
-          profiles:(prof||[]).find(p=>p.id===s.user_id)||{name:"—",interno:"—"},
-          condominii:(conds||[]).find(c=>c.id===s.cond_id)||{nome:"—"},
-        })));
-      } else { setList([]); }
+        const uIds=[...new Set(segn.map(s=>s.user_id))].join(",");
+        const cIds=[...new Set(segn.map(s=>s.cond_id))].join(",");
+        const [prof,conds]=await Promise.all([GET("profiles",`id=in.(${uIds})&select=id,name,interno`,tok),GET("condominii",`id=in.(${cIds})&select=id,nome`,tok)]);
+        setList(segn.map(s=>({...s,profiles:(prof||[]).find(p=>p.id===s.user_id)||{name:"—",interno:"—"},condominii:(conds||[]).find(c=>c.id===s.cond_id)||{nome:"—"}})));
+      }else setList([]);
     }catch(e){console.error(e);}
     setLoading(false);
   },[tok,filterStato,filterCond]);
-
   useEffect(()=>{load();},[load]);
   const updateStato=async(id,stato)=>{ try{await PATCH("segnalazioni",`id=eq.${id}`,{stato},tok); load();}catch(e){alert(e.message);} };
-
   return (
     <div>
       <div className="mb-6"><h2 className="text-2xl font-black text-gray-800">Segnalazioni</h2><p className="text-gray-400 text-sm">{list.length} segnalazioni</p></div>
       <div className="flex gap-3 mb-5">
         <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" value={filterStato} onChange={e=>setFilterStato(e.target.value)}>
-          <option value="">Tutti gli stati</option>
-          <option value="aperta">Aperte</option>
-          <option value="in_lavorazione">In lavorazione</option>
-          <option value="chiusa">Chiuse</option>
+          <option value="">Tutti gli stati</option><option value="aperta">Aperte</option><option value="in_lavorazione">In lavorazione</option><option value="chiusa">Chiuse</option>
         </select>
         <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1" value={filterCond} onChange={e=>setFilterCond(e.target.value)}>
-          <option value="">Tutti i condomìni</option>
-          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+          <option value="">Tutti i condomìni</option>{condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -902,11 +842,7 @@ function AdminSegnalazioni({tok}) {
           <div key={s.id} className={`${i<list.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50" onClick={()=>setExpanded(expanded===s.id?null:s.id)}>
               <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <StatoBadge s={s.stato}/>
-                  {s.urgenza==="urgente"&&<span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">⚠️ Urgente</span>}
-                  <span className="text-xs text-gray-400">{new Date(s.created_at).toLocaleDateString("it-IT")}</span>
-                </div>
+                <div className="flex items-center gap-2 mb-1"><StatoBadge s={s.stato}/>{s.urgenza==="urgente"&&<span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">⚠️ Urgente</span>}<span className="text-xs text-gray-400">{new Date(s.created_at).toLocaleDateString("it-IT")}</span></div>
                 <p className="font-semibold text-gray-800 text-sm">{s.profiles?.name} · Int.{s.profiles?.interno}</p>
                 <p className="text-xs text-gray-400">{s.condominii?.nome} · {s.tipo}</p>
               </div>
@@ -939,42 +875,32 @@ function AdminContatti({tok}) {
   if(!f) return <Spinner/>;
   return (
     <div>
-      <div className="mb-6"><h2 className="text-2xl font-black text-gray-800">Contatti Studio</h2><p className="text-gray-400 text-sm">Visibili a piè di pagina e usati per le notifiche email.</p></div>
+      <div className="mb-6"><h2 className="text-2xl font-black text-gray-800">Contatti Studio</h2><p className="text-gray-400 text-sm">Visibili a piè di pagina e usati per le notifiche.</p></div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         {[{k:"nome",l:"Nome studio"},{k:"telefono",l:"Telefono"},{k:"email",l:"Email (riceve le segnalazioni)"},{k:"indirizzo",l:"Indirizzo"},{k:"orari",l:"Orari"}].map(({k,l})=><Inp key={k} label={l} value={f[k]||""} onChange={e=>s(k,e.target.value)}/>)}
-        <div className="flex items-center gap-4 pt-4 border-t border-gray-100">
-          <Btn variant="success" onClick={save}>✓ Salva</Btn>
-          {saved&&<p className="text-emerald-600 text-sm font-semibold">Salvato!</p>}
-        </div>
+        <div className="flex items-center gap-4 pt-4 border-t border-gray-100"><Btn variant="success" onClick={save}>✓ Salva</Btn>{saved&&<p className="text-emerald-600 text-sm font-semibold">Salvato!</p>}</div>
       </div>
       <div className="mt-5"><p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">Anteprima footer</p><div className="rounded-2xl overflow-hidden border border-gray-200"><ContactFooter c={f}/></div></div>
     </div>
   );
 }
 
-// ── Condomino Account ─────────────────────────────────────────────────────────
+// ── Condomino ─────────────────────────────────────────────────────────────────
 function CondAccount({user,onLogout}) {
   const [loading,setLoading]=useState(false);
   const deactivate=async()=>{
-    if(!window.confirm("Sei sicuro di voler disattivare il tuo account?\n\nI tuoi documenti personali verranno eliminati definitivamente.\nI tuoi dati di contatto rimarranno nel sistema.\nPotrai chiedere la riattivazione contattando lo studio.")) return;
+    if(!window.confirm("Sei sicuro di voler disattivare il tuo account?\n\nI tuoi documenti personali verranno eliminati definitivamente.\nI tuoi dati di contatto rimarranno nel sistema.\nPotrai richiedere la riattivazione contattando lo studio.")) return;
     setLoading(true);
     try{
       await DEL("personal_docs",`user_id=eq.${user.id}`,user.token);
       await PATCH("profiles",`id=eq.${user.id}`,{stato:"disattivato"},user.token);
       const contatti=(await GET("contatti","id=eq.1",user.token))?.[0];
-      if(contatti?.email){
-        await sendEmail([contatti.email],
-          `⚠️ Disattivazione account — ${user.name} — ${user.condominii?.nome}`,
-          `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
-            <h2 style="color:#e53e3e">Disattivazione Account</h2>
-            <p>Il condomino <strong>${user.name}</strong> ha disattivato il proprio account.</p>
-            <p><strong>Condominio:</strong> ${user.condominii?.nome} · Int. ${user.interno}</p>
-            <p><strong>Email:</strong> ${user.email||"—"}</p>
-            <p>I documenti personali sono stati eliminati. Puoi riattivare l'account dal pannello Gestione Utenti.</p>
-            ${mailFooter}
-          </div>`
-        );
-      }
+      if(contatti?.email) await sendEmail([contatti.email],`⚠️ Disattivazione account — ${user.name} — ${user.condominii?.nome}`,
+        `<div style="font-family:sans-serif;max-width:500px;margin:0 auto"><h2 style="color:#e53e3e">Disattivazione Account</h2>
+        <p>Il condomino <strong>${user.name}</strong> ha disattivato il proprio account.</p>
+        <p><strong>Condominio:</strong> ${user.condominii?.nome} · Int. ${user.interno}</p>
+        <p><strong>Email:</strong> ${user.email||"—"}</p>
+        <p>Puoi riattivare l'account dal pannello Gestione Utenti.</p>${mailFooter}</div>`);
       onLogout();
     }catch(e){alert(e.message);}
     setLoading(false);
@@ -984,47 +910,34 @@ function CondAccount({user,onLogout}) {
       <h2 className="text-2xl font-black text-gray-800 mb-2">Il mio account</h2>
       <p className="text-gray-400 text-sm mb-6">Gestisci le impostazioni del tuo profilo.</p>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
-        <h3 className="font-bold text-gray-700 mb-1">Dati profilo</h3>
-        <p className="text-sm text-gray-600">Nome: <strong>{user.name}</strong></p>
-        <p className="text-sm text-gray-600">Email: <strong>{user.email||"—"}</strong></p>
+        <h3 className="font-bold text-gray-700 mb-3">Dati profilo</h3>
+        <p className="text-sm text-gray-600 mb-1">Nome: <strong>{user.name}</strong></p>
+        <p className="text-sm text-gray-600 mb-1">Email: <strong>{user.email||"—"}</strong></p>
         <p className="text-sm text-gray-600">Condominio: <strong>{user.condominii?.nome}</strong> · Int. {user.interno}</p>
       </div>
       <div className="bg-red-50 border border-red-100 rounded-2xl p-6">
         <h3 className="font-bold text-red-700 mb-2">⚠️ Zona pericolosa</h3>
-        <p className="text-sm text-red-600 mb-4">Disattivando il tuo account i tuoi <strong>documenti personali verranno eliminati</strong>. I tuoi dati di contatto rimarranno nel sistema e potrai essere riattivato dall'amministratore.</p>
+        <p className="text-sm text-red-600 mb-4">Disattivando il tuo account i tuoi <strong>documenti personali verranno eliminati</strong>. I tuoi dati di contatto rimarranno nel sistema.</p>
         <Btn variant="danger" onClick={deactivate} disabled={loading}>{loading?"Disattivazione...":"Disattiva il mio account"}</Btn>
       </div>
     </div>
   );
 }
 
-// ── Condomino ─────────────────────────────────────────────────────────────────
 function CondominoPanel({user,onLogout,view,setView}) {
   const {data:contattiArr}=useData(()=>GET("contatti","id=eq.1",user.token),[user.token]);
   const condo=user.condominii;
-  const isEx = user.stato==="ex_condomino";
-  const navBase = isEx
+  const isEx=user.stato==="ex_condomino";
+  const nav=isEx
     ? [{id:"docs",label:"Documenti",icon:"📄"},{id:"account",label:"Il mio account",icon:"⚙️"}]
-    : [
-        {id:"docs",         label:"Documenti",     icon:"📄"},
-        {id:"generali",     label:"Doc. Generali", icon:"📋"},
-        {id:"inq",          label:"Inquilini",      icon:"🏠"},
-        {id:"cat",          label:"Dati Catastali", icon:"📊"},
-        {id:"segnalazioni", label:"Segnalazioni",   icon:"🚨"},
-        {id:"account",      label:"Il mio account", icon:"⚙️"},
-      ];
+    : [{id:"docs",label:"Documenti",icon:"📄"},{id:"generali",label:"Doc. Generali",icon:"📋"},{id:"inq",label:"Inquilini",icon:"🏠"},{id:"cat",label:"Dati Catastali",icon:"📊"},{id:"segnalazioni",label:"Segnalazioni",icon:"🚨"},{id:"account",label:"Il mio account",icon:"⚙️"}];
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar items={navBase} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
+      <Sidebar items={nav} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
       <div className="flex flex-col flex-1 min-h-screen">
         <div className="flex-1 p-8 overflow-auto">
           <div className="max-w-3xl mx-auto">
-            {isEx&&(
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 mb-4 flex items-center gap-3">
-                <span className="text-xl">ℹ️</span>
-                <p className="text-sm text-amber-700">Sei registrato come <strong>ex condomino</strong>. Hai accesso solo ai tuoi documenti personali.</p>
-              </div>
-            )}
+            {isEx&&<div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 mb-4 flex items-center gap-3"><span className="text-xl">ℹ️</span><p className="text-sm text-amber-700">Sei registrato come <strong>ex condomino</strong>. Hai accesso solo ai tuoi documenti personali.</p></div>}
             <div className="bg-white border border-gray-100 rounded-2xl px-5 py-3 mb-6 flex items-center gap-3 shadow-sm">
               <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
               <div><p className="text-sm font-bold text-gray-800">{condo?.nome||"Condominio"}</p><p className="text-xs text-gray-400">{condo?.indirizzo} · {condo?.cap} {condo?.citta} · Int. {user.interno}</p></div>
@@ -1044,7 +957,8 @@ function CondominoPanel({user,onLogout,view,setView}) {
 }
 
 function CondDocs({user, soloPersonali=false}) {
-  const [sezione,setSezione]=useState(soloPersonali?"personal":"cond"); const [tab,setTab]=useState("consuntivi");
+  const [sezione,setSezione]=useState(soloPersonali?"personal":"cond");
+  const [tab,setTab]=useState("consuntivi");
   const {data:docs,loading}=useData(()=>
     sezione==="cond"
       ? GET("docs",`cond_id=eq.${user.cond_id}&cat=eq.${tab}&select=*&order=uploaded_at.desc`,user.token)
@@ -1058,11 +972,13 @@ function CondDocs({user, soloPersonali=false}) {
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-5">Documenti</h2>
-      <div className="flex gap-2 mb-4">
-        {[{k:"cond",l:"🏢 Condominiali"},{k:"personal",l:"👤 Personali"}].map(({k,l})=>(
-          <button key={k} onClick={()=>setSezione(k)} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${sezione===k?"bg-slate-800 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>{l}</button>
-        ))}
-      </div>
+      {!soloPersonali&&(
+        <div className="flex gap-2 mb-4">
+          {[{k:"cond",l:"🏢 Condominiali"},{k:"personal",l:"👤 Personali"}].map(({k,l})=>(
+            <button key={k} onClick={()=>setSezione(k)} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${sezione===k?"bg-slate-800 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>{l}</button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 mb-5 flex-wrap">
         {Object.entries(CAT_LABELS).map(([k,v])=>(
           <button key={k} onClick={()=>setTab(k)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${tab===k?"bg-blue-600 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>
@@ -1096,7 +1012,7 @@ function CondGeneralDocs({user}) {
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-2">Documenti Generali</h2>
-      <p className="text-gray-400 text-sm mb-5">Documenti dello studio validi per tutti i condomìni.</p>
+      <p className="text-gray-400 text-sm mb-5">Documenti del condominio.</p>
       <div className="flex gap-2 mb-5 flex-wrap">
         {Object.entries(CAT_LABELS).map(([k,v])=>(
           <button key={k} onClick={()=>setTab(k)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${tab===k?"bg-blue-600 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>
@@ -1119,54 +1035,26 @@ function CondGeneralDocs({user}) {
   );
 }
 
-function InqModal({mode,data,onSave,onClose}) {
-  const [f,setF]=useState(data); const s=(k,v)=>setF(p=>({...p,[k]:v}));
-  return (
-    <Modal title={mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={onClose}>
-      <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
-      <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
-      <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
-      <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
-      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)}>Salva</Btn></div>
-    </Modal>
-  );
-}
-
 function CondInquilini({user}) {
   const {data:inq,loading,reload}=useData(()=>GET("inquilini",`user_id=eq.${user.id}&select=*&order=created_at`,user.token),[user.token,user.id]);
   const [modal,setModal]=useState(null);
-  const save=async f=>{ try{modal.mode==="add"?await POST("inquilini",{...f,user_id:user.id},user.token):await PATCH("inquilini",`id=eq.${f.id}`,f,user.token); setModal(null); reload();}catch(e){alert(e.message);} };
+  const save=async f=>{ try{ modal.mode==="add"?await POST("inquilini",{...f,user_id:user.id},user.token):await PATCH("inquilini",`id=eq.${f.id}`,f,user.token); setModal(null); reload(); }catch(e){alert(e.message);} };
   const remove=async id=>{ if(window.confirm("Rimuovere?")){ try{await DEL("inquilini",`id=eq.${id}`,user.token); reload();}catch(e){alert(e.message);} } };
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div><h2 className="text-2xl font-black text-gray-800">Gestione Inquilini</h2><p className="text-gray-400 text-sm">{inq?.length||0} inquilino/i</p></div>
-        <Btn onClick={()=>setModal({mode:"add",data:{nome:"",email:"",tel:"",dal:"",al:""}})}>+ Aggiungi</Btn>
-      </div>
+      <div className="flex items-center justify-between mb-6"><div><h2 className="text-2xl font-black text-gray-800">Gestione Inquilini</h2><p className="text-gray-400 text-sm">{inq?.length||0} inquilino/i</p></div><Btn onClick={()=>setModal({mode:"add",data:{nome:"",email:"",tel:"",dal:"",al:""}})}>+ Aggiungi</Btn></div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading?<Spinner/>:!inq?.length?<EmptyState icon="🏠" text="Nessun inquilino registrato."/>:inq.map((i,idx)=>(
+        {loading?<Spinner/>:!inq?.length?<EmptyState icon="🏠" text="Nessun inquilino."/>:inq.map((i,idx)=>(
           <div key={i.id} className={`flex items-center justify-between p-5 ${idx<inq.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold text-sm">{i.nome?.charAt(0)}</div>
-              <div>
-                <p className="font-semibold text-gray-800">{i.nome}</p>
-                <p className="text-xs text-gray-400">{i.email}{i.tel?` · ${i.tel}`:""}</p>
-                <p className="text-xs text-gray-400">{i.dal?`Dal ${new Date(i.dal).toLocaleDateString("it-IT")}`:""}{i.al?` al ${new Date(i.al).toLocaleDateString("it-IT")}`:" · (in corso)"}</p>
-              </div>
+              <div><p className="font-semibold text-gray-800">{i.nome}</p><p className="text-xs text-gray-400">{i.email}{i.tel?` · ${i.tel}`:""}</p><p className="text-xs text-gray-400">{i.dal?`Dal ${new Date(i.dal).toLocaleDateString("it-IT")}`:""}{i.al?` al ${new Date(i.al).toLocaleDateString("it-IT")}`:" · (in corso)"}</p></div>
             </div>
             <div className="flex gap-2"><Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...i}})}>Modifica</Btn><Btn variant="danger" onClick={()=>remove(i.id)}>Rimuovi</Btn></div>
           </div>
         ))}
       </div>
-      {modal&&<Modal title={modal.mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={()=>setModal(null)}>
-        {(()=>{const [f,setF]=useState(modal.data); const s=(k,v)=>setF(p=>({...p,[k]:v})); return(<>
-          <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
-          <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
-          <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
-          <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
-          <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={()=>setModal(null)}>Annulla</Btn><Btn onClick={()=>f.nome&&save(f)}>Salva</Btn></div>
-        </>);})()}
-      </Modal>}
+      {modal&&<InqModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
@@ -1182,13 +1070,9 @@ function CondCatastali({user}) {
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-2">Dati Catastali</h2>
-      <p className="text-gray-400 text-sm mb-5">Dati catastali della tua unità immobiliare.</p>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="grid grid-cols-2 gap-x-5">{fields.map(({k,l,p})=><Inp key={k} label={l} value={f[k]||""} onChange={e=>s(k,e.target.value)} placeholder={p}/>)}</div>
-        <div className="flex items-center gap-4 mt-3 pt-4 border-t border-gray-100">
-          <Btn variant="success" onClick={save}>✓ Salva dati catastali</Btn>
-          {saved&&<p className="text-emerald-600 text-sm font-semibold">Salvato!</p>}
-        </div>
+        <div className="flex items-center gap-4 mt-3 pt-4 border-t border-gray-100"><Btn variant="success" onClick={save}>✓ Salva dati catastali</Btn>{saved&&<p className="text-emerald-600 text-sm font-semibold">Salvato!</p>}</div>
       </div>
     </div>
   );
@@ -1200,14 +1084,12 @@ function CondSegnalazioni({user}) {
   const [sending,setSending]=useState(false); const [sent,setSent]=useState(false);
   const s=(k,v)=>setForm(p=>({...p,[k]:v}));
   const submit=async()=>{
-    if(!form.tipo||!form.descrizione){alert("Compila tutti i campi."); return;}
-    setSending(true);
+    if(!form.tipo||!form.descrizione){alert("Compila tutti i campi."); return;} setSending(true);
     try{
       await POST("segnalazioni",{user_id:user.id,cond_id:user.cond_id,...form},user.token);
       const contatti=(await GET("contatti","id=eq.1",user.token))?.[0];
       await notifySegnalazione(form,user.name,user.condominii?.nome,user.interno,contatti?.email);
-      setForm({tipo:"",descrizione:"",urgenza:"normale"});
-      setSent(true); setTimeout(()=>setSent(false),3000); reload();
+      setForm({tipo:"",descrizione:"",urgenza:"normale"}); setSent(true); setTimeout(()=>setSent(false),3000); reload();
     }catch(e){alert(e.message);}
     setSending(false);
   };
@@ -1217,30 +1099,21 @@ function CondSegnalazioni({user}) {
       <h2 className="text-2xl font-black text-gray-800 mb-5">Segnalazioni</h2>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
         <h3 className="font-bold text-gray-700 mb-4">Nuova segnalazione</h3>
-        <Sel label="Tipo di problema *" value={form.tipo} onChange={e=>s("tipo",e.target.value)}>
-          <option value="">— Seleziona —</option>
-          {tipi.map(t=><option key={t} value={t}>{t}</option>)}
-        </Sel>
+        <Sel label="Tipo di problema *" value={form.tipo} onChange={e=>s("tipo",e.target.value)}><option value="">— Seleziona —</option>{tipi.map(t=><option key={t} value={t}>{t}</option>)}</Sel>
         <div className="mb-3">
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Descrizione *</label>
           <textarea value={form.descrizione} onChange={e=>s("descrizione",e.target.value)} rows={4} placeholder="Descrivi il problema in dettaglio..."
             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"/>
         </div>
-        <Sel label="Urgenza" value={form.urgenza} onChange={e=>s("urgenza",e.target.value)}>
-          <option value="normale">Normale</option>
-          <option value="urgente">⚠️ Urgente</option>
-        </Sel>
-        {sent&&<div className="bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-3">✓ Segnalazione inviata! Lo studio la contatterà al più presto.</div>}
-        <Btn onClick={submit} disabled={sending||!form.tipo||!form.descrizione}>{sending?"Invio in corso...":"🚨 Invia segnalazione"}</Btn>
+        <Sel label="Urgenza" value={form.urgenza} onChange={e=>s("urgenza",e.target.value)}><option value="normale">Normale</option><option value="urgente">⚠️ Urgente</option></Sel>
+        {sent&&<div className="bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-3">✓ Segnalazione inviata!</div>}
+        <Btn onClick={submit} disabled={sending||!form.tipo||!form.descrizione}>{sending?"Invio...":"🚨 Invia segnalazione"}</Btn>
       </div>
       <h3 className="font-bold text-gray-700 mb-3">Le mie segnalazioni</h3>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading?<Spinner/>:!list?.length?<EmptyState icon="🚨" text="Nessuna segnalazione inviata."/>:list.map((s,i)=>(
           <div key={s.id} className={`p-4 ${i<list.length-1?"border-b border-gray-50":""}`}>
-            <div className="flex items-center justify-between mb-1">
-              <p className="font-semibold text-gray-800 text-sm">{s.tipo}</p>
-              <StatoBadge s={s.stato}/>
-            </div>
+            <div className="flex items-center justify-between mb-1"><p className="font-semibold text-gray-800 text-sm">{s.tipo}</p><StatoBadge s={s.stato}/></div>
             <p className="text-xs text-gray-500 mb-1">{s.descrizione}</p>
             <p className="text-xs text-gray-400">{new Date(s.created_at).toLocaleDateString("it-IT")} · {s.urgenza==="urgente"?"⚠️ Urgente":"Normale"}</p>
           </div>
@@ -1270,14 +1143,8 @@ export default function App() {
   },[]);
 
   const acceptCookie=()=>{ localStorage.setItem("cookie_consent_v1","accepted"); setCookieOk(true); };
-  const handleLogin=async u=>{
-    try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role}));}catch{}
-    setUser(u);
-    setView(u.role==="admin"?"condominii":"docs");
-  };
-  const handlePasswordChanged=()=>{
-    setUser(u=>({...u,primo_accesso:false}));
-  };
+  const handleLogin=async u=>{ try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role}));}catch{} setUser(u); setView(u.role==="admin"?"condominii":"docs"); };
+  const handlePasswordChanged=()=>{ setUser(u=>({...u,primo_accesso:false})); };
   const handleLogout=async()=>{ try{await sb("/auth/v1/logout",{method:"POST",token:user.token});}catch{} localStorage.removeItem("sb_session_v1"); setUser(null); };
 
   if(checking) return <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-300 border-t-white rounded-full animate-spin"/></div>;
