@@ -756,15 +756,39 @@ function AdminGeneralDocs({tok}) {
 function AdminSegnalazioni({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome&order=nome",tok),[tok]);
   const [filterStato,setFilterStato]=useState(""); const [filterCond,setFilterCond]=useState("");
+  const [list,setList]=useState([]); const [loading,setLoading]=useState(true);
   const [expanded,setExpanded]=useState(null);
-  let qs="select=*,profiles!inner(name,interno),condominii!inner(nome)&order=created_at.desc";
-  if(filterStato) qs+=`&stato=eq.${filterStato}`;
-  if(filterCond) qs+=`&cond_id=eq.${filterCond}`;
-  const {data:list,loading,reload}=useData(()=>GET("segnalazioni",qs,tok),[tok,filterStato,filterCond]);
-  const updateStato=async(id,stato)=>{ try{await PATCH("segnalazioni",`id=eq.${id}`,{stato},tok); reload();}catch(e){alert(e.message);} };
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      let qs="select=*&order=created_at.desc";
+      if(filterStato) qs+=`&stato=eq.${filterStato}`;
+      if(filterCond) qs+=`&cond_id=eq.${filterCond}`;
+      const segn=await GET("segnalazioni",qs,tok)||[];
+      if(segn.length){
+        const userIds=[...new Set(segn.map(s=>s.user_id))].join(",");
+        const condIds=[...new Set(segn.map(s=>s.cond_id))].join(",");
+        const [prof,conds]=await Promise.all([
+          GET("profiles",`id=in.(${userIds})&select=id,name,interno`,tok),
+          GET("condominii",`id=in.(${condIds})&select=id,nome`,tok),
+        ]);
+        setList(segn.map(s=>({
+          ...s,
+          profiles:(prof||[]).find(p=>p.id===s.user_id)||{name:"—",interno:"—"},
+          condominii:(conds||[]).find(c=>c.id===s.cond_id)||{nome:"—"},
+        })));
+      } else { setList([]); }
+    }catch(e){console.error(e);}
+    setLoading(false);
+  },[tok,filterStato,filterCond]);
+
+  useEffect(()=>{load();},[load]);
+  const updateStato=async(id,stato)=>{ try{await PATCH("segnalazioni",`id=eq.${id}`,{stato},tok); load();}catch(e){alert(e.message);} };
+
   return (
     <div>
-      <div className="mb-6"><h2 className="text-2xl font-black text-gray-800">Segnalazioni</h2><p className="text-gray-400 text-sm">{list?.length||0} segnalazioni</p></div>
+      <div className="mb-6"><h2 className="text-2xl font-black text-gray-800">Segnalazioni</h2><p className="text-gray-400 text-sm">{list.length} segnalazioni</p></div>
       <div className="flex gap-3 mb-5">
         <select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" value={filterStato} onChange={e=>setFilterStato(e.target.value)}>
           <option value="">Tutti gli stati</option>
@@ -778,7 +802,7 @@ function AdminSegnalazioni({tok}) {
         </select>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading?<Spinner/>:!list?.length?<EmptyState icon="🚨" text="Nessuna segnalazione."/>:list.map((s,i)=>(
+        {loading?<Spinner/>:!list.length?<EmptyState icon="🚨" text="Nessuna segnalazione."/>:list.map((s,i)=>(
           <div key={s.id} className={`${i<list.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50" onClick={()=>setExpanded(expanded===s.id?null:s.id)}>
               <div>
