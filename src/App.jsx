@@ -856,7 +856,7 @@ function BulkImportiModal({condId,rate,tok,onClose}) {
         for(const u of users){
           const key=r.id+":"+u.id;
           const imp=parseFloat((vals[key]||"").replace(",","."));
-          if(!isNaN(imp)&&imp>0) await UPS("rate_condomino",{rata_id:r.id,user_id:u.id,importo:imp,notificato:false},tok);
+          if(!isNaN(imp)&&imp>0) await sb("/rest/v1/rate_condomino?on_conflict=rata_id,user_id",{method:"POST",body:{rata_id:r.id,user_id:u.id,importo:imp,notificato:false},prefer:"return=representation,resolution=merge-duplicates",token:tok});
         }
       }
       alert("Importi salvati correttamente!");
