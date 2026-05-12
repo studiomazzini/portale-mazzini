@@ -834,7 +834,17 @@ function AdminImport({tok}) {
     for(let i=0;i<rows.length;i++){
       const r=rows[i]; setProgress(Math.round(((i+1)/rows.length)*100));
       try{
-        const {id:uid}=await createAuthUser(r.email||null,r.password);
+        let uid;
+        try {
+          const res = await createAuthUser(r.email||null, r.password);
+          uid = res.id;
+        } catch(authErr) {
+          // Email gia in uso: genera email tecnica fittizia per il login
+          const base = r.nomeCompleto.toLowerCase().replace(/[^a-z0-9]/g,".");
+          const fake = base + "." + Date.now() + "@noemail.local";
+          const res2 = await createAuthUser(fake, r.password);
+          uid = res2.id;
+        }
         await POST("profiles",{
           id:uid, name:r.nomeCompleto, role:"condomino",
           cond_id:Number(selCond),
