@@ -957,7 +957,7 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
 function AdminRate({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(""); const [rate,setRate]=useState([]); const [loading,setLoading]=useState(false);
-  const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false); const [bulkModal,setBulkModal]=useState(false);
+  const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
   useEffect(()=>{ loadRate(); },[selCond,tok]);
   const loadRate=async()=>{ if(!selCond) return; setLoading(true); try{setRate(await GET("rate_condominio",`cond_id=eq.${selCond}&select=*&order=numero_rata`,tok)||[]);}catch(e){} setLoading(false); };
