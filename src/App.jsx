@@ -67,11 +67,12 @@ const catText = c => ({consuntivi:"un nuovo consuntivo",preventivi:"un nuovo pre
 
 async function notifyCondoDoc(condId, docName, cat, tok) {
   try {
-    const users = await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=name,email`,tok);
+    const users = await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=name,email,email2`,tok);
     const condo = (await GET("condominii",`id=eq.${condId}&select=nome`,tok))?.[0];
     for(const u of users||[]){
-      if(!isRealEmail(u.email)) continue;
-      await sendEmail([u.email],`${condo?.nome} — Nuovo documento disponibile`,
+      const emails=[u.email,u.email2].filter(e=>isRealEmail(e));
+      if(!emails.length) continue;
+      await sendEmail(emails,`${condo?.nome} — Nuovo documento disponibile`,
         `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
           <h2 style="color:#1e40af">Studio Amministrazioni Immobiliari</h2>
           <p>Gentile <strong>${u.name}</strong>,</p>
@@ -83,9 +84,10 @@ async function notifyCondoDoc(condId, docName, cat, tok) {
 }
 async function notifyPersonalDoc(userId, docName, cat, tok) {
   try {
-    const u = (await GET("profiles",`id=eq.${userId}&select=name,email`,tok))?.[0];
-    if(!isRealEmail(u?.email)) return;
-    await sendEmail([u.email],"Nuovo documento personale disponibile",
+    const u = (await GET("profiles",`id=eq.${userId}&select=name,email,email2`,tok))?.[0];
+    const emails=[u?.email,u?.email2].filter(e=>isRealEmail(e));
+    if(!emails.length) return;
+    await sendEmail(emails,"Nuovo documento personale disponibile",
       `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
         <h2 style="color:#1e40af">Studio Amministrazioni Immobiliari</h2>
         <p>Gentile <strong>${u.name}</strong>,</p>
@@ -560,6 +562,8 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
         {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
       </Sel>
       <div className="flex gap-3"><div className="flex-1"><Inp label="Civico" value={f.scala} onChange={e=>s("scala",e.target.value)}/></div><div className="flex-1"><Inp label="Interno" value={f.interno} onChange={e=>s("interno",e.target.value)}/></div></div>
+      <div className="flex gap-3"><div className="flex-1"><Inp label="Telefono 1" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)} placeholder="Es. 051 452244"/></div><div className="flex-1"><Inp label="Telefono 2" value={f.telefono2||""} onChange={e=>s("telefono2",e.target.value)} placeholder="Es. 333 1234567"/></div></div>
+      <Inp label="Email 2 (opzionale)" type="email" value={f.email2||""} onChange={e=>s("email2",e.target.value)} hint="Riceverà le notifiche insieme alla email principale"/>
       <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.name&&onSave(f)}>Salva</Btn></div>
     </Modal>
   );
@@ -589,7 +593,7 @@ function AdminUtenti({tok}) {
         const {id:uid,email:realEmail}=await createAuthUser(f.email||null,f.pwd);
         await POST("profiles",{id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null},tok);
       }else{
-        await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:f.email||null},tok);
+        await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:f.email||null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null},tok);
       }
       setModal(null); load();
     }catch(e){alert(e.message);}
@@ -1361,6 +1365,9 @@ function CondAccount({user,onLogout}) {
         <h3 className="font-bold text-gray-700 mb-1">Dati profilo</h3>
         <p className="text-sm text-gray-600">Nome: <strong>{user.name}</strong></p>
         <p className="text-sm text-gray-600">Email: <strong>{user.email||"—"}</strong></p>
+        {user.email2&&<p className="text-sm text-gray-600">Email 2: <strong>{user.email2}</strong></p>}
+        {user.telefono&&<p className="text-sm text-gray-600">Telefono: <strong>{user.telefono}</strong></p>}
+        {user.telefono2&&<p className="text-sm text-gray-600">Telefono 2: <strong>{user.telefono2}</strong></p>}
         <p className="text-sm text-gray-600">Condominio: <strong>{user.condominii?.nome}</strong> · Int. {user.interno}</p>
       </div>
       <div className="bg-red-50 border border-red-100 rounded-2xl p-6">
