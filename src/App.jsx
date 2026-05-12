@@ -1060,19 +1060,38 @@ function ImportRateExcelModal({condId, tok, onClose}) {
       const data=XLSX.utils.sheet_to_json(ws,{defval:""});
       if(!data.length){setErr("File vuoto."); return;}
 
-      const colonne=Object.keys(data[0]);
-      const unitaCol=colonne.find(k=>k.toLowerCase().includes("unit")||k.toLowerCase()==="interno")||colonne[0];
+      // Leggi intestazioni grezze (gestisce date convertite da Excel)
+      const rawHdr=XLSX.utils.sheet_to_json(ws,{header:1,raw:true})[0]||[];
+      const headerStr=rawHdr.map(h=>{
+        if(typeof h==="number"){
+          // Numero seriale Excel → converti in data
+          try{
+            const info=XLSX.SSF.parse_date_code(h);
+            if(info) return String(info.d).padStart(2,"0")+"/"+String(info.m).padStart(2,"0")+"/"+info.y;
+          }catch(e){}
+        }
+        return String(h||"");
+      });
+      // Rimappa i dati con le intestazioni stringa
+      const data2=XLSX.utils.sheet_to_json(ws,{defval:"",header:headerStr}).slice(1);
 
-      // Identifica le colonne rata (tutte tranne Unità)
-      const rataCols=colonne.filter(k=>k!==unitaCol).map((k,i)=>{
+      const unitaCol=headerStr.find(k=>k.toLowerCase().includes("unit")||k.toLowerCase()==="interno")||headerStr[0];
+
+      const rataCols=headerStr.filter(k=>k&&k!==unitaCol).map((k,i)=>{
         const data_scadenza=parseData(k);
         const numero_rata=parseNumeroRata(k)||i+1;
         return {colonna:k, numero_rata, data_scadenza, descrizione:k};
       }).filter(r=>r.data_scadenza);
 
-      if(!rataCols.length){setErr("Nessuna colonna rata trovata. Assicurati che le intestazioni contengano date tipo '17/06/25'."); return;}
+      if(!rataCols.length){
+        setErr("Nessuna colonna rata trovata. Intestazioni rilevate: "+headerStr.join(" | "));
+        return;
+      }
 
-      const righeP=data.filter(r=>String(r[unitaCol]||"").trim()).map(r=>({
+      // Usa data2 al posto di data per le righe
+      const dataToUse=data2.length>0?data2:data;
+
+      const righeP=dataToUse.filter(r=>String(r[unitaCol]||"").trim()).map(r=>({
         unita:String(r[unitaCol]).trim(),
         importi:Object.fromEntries(rataCols.map(rc=>[rc.colonna, String(r[rc.colonna]||"").replace(/[€s]/g,"").replace(",",".")]))
       })).filter(r=>r.unita&&rataCols.some(rc=>parseFloat(r.importi[rc.colonna])>0));
