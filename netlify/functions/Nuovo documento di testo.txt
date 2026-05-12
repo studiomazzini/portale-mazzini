@@ -1,0 +1,68 @@
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST")
+    return { statusCode: 405, body: "Method Not Allowed" };
+
+  const SB_URL = process.env.VITE_SUPABASE_URL;
+  const SB_SVC = process.env.VITE_SUPABASE_SERVICE_KEY;
+  const RS_KEY = process.env.VITE_RESEND_KEY;
+
+  const hdr = { "Content-Type": "application/json", "apikey": SB_SVC, "Authorization": `Bearer ${SB_SVC}` };
+  const get = async (path) => { const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: hdr }); return r.json(); };
+  const patch = async (path, body) => fetch(`${SB_URL}/rest/v1/${path}`, { method: "PATCH", headers: { ...hdr, "Prefer": "return=minimal" }, body: JSON.stringify(body) });
+
+  const today = new Date();
+  const in5 = new Date(today.getTime() + 5 * 24 * 60 * 60 * 1000);
+  const todayStr = today.toISOString().split("T")[0];
+  const in5Str = in5.toISOString().split("T")[0];
+
+  // Rate con scadenza nei prossimi 5 giorni
+  const rate = await get(`rate_condominio?data_scadenza=gte.${todayStr}&data_scadenza=lte.${in5Str}&select=*,condominii(nome)`);
+
+  let sent = 0;
+
+  for (const rata of Array.isArray(rate) ? rate : []) {
+    const importi = await get(`rate_condomino?rata_id=eq.${rata.id}&notificato=eq.false&select=*`);
+    if (!Array.isArray(importi) || !importi.length) continue;
+
+    const ids = importi.map(i => i.user_id).join(",");
+    const profiles = await get(`profiles?id=in.(${ids})&select=id,name,email,stato`);
+
+    for (const imp of importi) {
+      const p = Array.isArray(profiles) ? profiles.find(x => x.id === imp.user_id) : null;
+      if (!p || p.stato !== "attivo" || !p.email || p.email.includes("@noemail.local")) continue;
+
+      const scadenza = new Date(rata.data_scadenza).toLocaleDateString("it-IT");
+      const importoFmt = Number(imp.importo).toLocaleString("it-IT", { minimumFractionDigits: 2 });
+
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RS_KEY}` },
+        body: JSON.stringify({
+          from: "Portale Condominiale <portale@studiomazzinibo.com>",
+          to: [p.email],
+          subject: `Promemoria scadenza Rata ${rata.numero_rata} — ${rata.condominii?.nome}`,
+          html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+            <h2 style="color:#1e40af">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</h2>
+            <p>Gentile <strong>${p.name}</strong>,</p>
+            <p>Le ricordiamo che la <strong>Rata ${rata.numero_rata}</strong>${rata.descrizione ? ` (${rata.descrizione})` : ""} del condominio <strong>${rata.condominii?.nome}</strong> scade il <strong>${scadenza}</strong>.</p>
+            <div style="background:#f1f5f9;padding:16px;border-radius:8px;margin:16px 0">
+              <p style="margin:6px 0">📅 <strong>Scadenza:</strong> ${scadenza}</p>
+              <p style="margin:6px 0">💶 <strong>Importo dovuto:</strong> € ${importoFmt}</p>
+            </div>
+            <p>Acceda al portale per maggiori informazioni:<br><a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>
+            <p style="color:#64748b;font-size:12px;margin-top:16px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</p>
+          </div>`
+        })
+      });
+
+      await patch(`rate_condomino?id=eq.${imp.id}`, { notificato: true });
+      sent++;
+    }
+  }
+
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ success: true, sent })
+  };
+};
