@@ -443,8 +443,6 @@ function CondominioModal({mode,data,onSave,onClose}) {
       <div className="flex gap-3"><div style={{width:"38%"}}><Inp label="CAP" value={f.cap} onChange={e=>s("cap",e.target.value)}/></div><div className="flex-1"><Inp label="Città" value={f.citta} onChange={e=>s("citta",e.target.value)}/></div></div>
       <Inp label="Telefono (opzionale)" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)} placeholder="Es. 051 452244"/>
       <Inp label="Email di contatto (opzionale)" type="email" value={f.email_contatto||""} onChange={e=>s("email_contatto",e.target.value)}/>
-      <Inp label="Telefono (opzionale)" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)} placeholder="Es. 051 452244"/>
-      <Inp label="Email di contatto (opzionale)" type="email" value={f.email_contatto||""} onChange={e=>s("email_contatto",e.target.value)}/>
       <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)} disabled={!f.nome}>Salva</Btn></div>
     </Modal>
   );
@@ -602,6 +600,8 @@ function AdminUtenti({tok}) {
       load();
     }catch(e){alert(e.message);}
   };
+  const makeExCondomino=async id=>{ if(!window.confirm("Impostare come ex-condomino? L'utente non potrà più accedere alle funzioni complete.")) return; try{await PATCH("profiles",`id=eq.${id}`,{stato:"ex_condomino"},tok); load();}catch(e){alert(e.message);} };
+  const reattiva=async id=>{ if(!window.confirm("Riattivare questo utente?")) return; try{await PATCH("profiles",`id=eq.${id}`,{stato:"attivo"},tok); load();}catch(e){alert(e.message);} };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -976,7 +976,6 @@ function AdminRate({tok}) {
         <div className="flex gap-2">
           <Btn variant="warning" onClick={sendReminders} disabled={sending}>{sending?"Invio...":"📧 Invia promemoria"}</Btn>
           {rate.length>0&&<Btn variant="secondary" onClick={()=>setBulkModal(true)}>📊 Gestisci importi</Btn>}
-          {rate.length>0&&<Btn variant="secondary" onClick={()=>setBulkModal(true)}>📊 Gestisci importi</Btn>}
           {rate.length<5&&<Btn onClick={()=>setModal({mode:"add",data:{numero_rata:rate.length+1,data_scadenza:"",descrizione:""}})}>+ Rata</Btn>}
         </div>
       </div>
@@ -998,7 +997,6 @@ function AdminRate({tok}) {
       </div>
       {modal&&<RataModal mode={modal.mode} data={modal.data} onSave={saveRata} onClose={()=>setModal(null)}/>}
       {importModal&&<ImportImportiModal rata={importModal} condId={selCond} tok={tok} onClose={()=>setImportModal(null)}/>}
-      {bulkModal&&<BulkImportiModal condId={selCond} rate={rate} tok={tok} onClose={()=>setBulkModal(false)}/>}
       {bulkModal&&<BulkImportiModal condId={selCond} rate={rate} tok={tok} onClose={()=>setBulkModal(false)}/>}
     </div>
   );
