@@ -685,22 +685,22 @@ function AdminImport({tok}) {
         const token=primoToken.charAt(0).toUpperCase()+primoToken.slice(1,4).toLowerCase();
         const mese=String(new Date().getMonth()+1).padStart(2,"0");
         return {
-          num:       g(r,["Num.","NUM","Num"]),
-          tipo:      g(r,["U/C/CP","TIPO","Tipo"]),
+          num:       g(r,["Cod. Anag.","Num.","NUM"]),
+          tipo:      g(r,["U/C/CP","TIPO","Tipo","Cod. Anag."]),
           cognome,   nome,   titolo,
           nomeCompleto,
-          presso:    g(r,["Presso","PRESSO"]),
-          via:       g(r,["Via","VIA"]),
-          localita:  g(r,["Località","Localita","LOCALITA","Località"]),
-          prov:      g(r,["Prov.","PROV","Prov"]),
-          cap:       g(r,["CAP","Cap"]),
-          email:     g(r,["E-mail","Email","EMAIL","E-Mail","e-mail"]),
-          email2:    g(r,["E-mail 2","Email 2","EMAIL 2","E-Mail 2"]),
-          tel:       g(r,["Tel","TEL","Tel."]),
-          tel2:      g(r,["Tel2","TEL2","Tel.2"]),
-          cell:      g(r,["Cell","CELL","Cell."]),
-          cell2:     g(r,["Cell2","CELL2","Cell.2"]),
-          password:  token+mese+"!"
+          interno:   g(r,["Unita","Unità","Interno","INTERNO"]),
+          presso:    g(r,["Presso","PRESSO","C/O"]),
+          via:       g(r,["Via","VIA","Indirizzo"]),
+          localita:  g(r,["Città","Citta","Località","Localita"]),
+          prov:      g(r,["Prov.","PROV","Prov","Provincia"]),
+          cap:       g(r,["Cap","CAP"]),
+          email:     g(r,["email 1","E-mail","Email","EMAIL","e-mail"]),
+          email2:    g(r,["email 2","E-mail 2","Email 2","EMAIL 2"]),
+          tel:       g(r,["Tel 1","Tel","TEL","Tel."]),
+          tel2:      g(r,["Tel 2","Tel2","TEL2"]),
+          cell:      g(r,["Cell 1","Cell","CELL"]),
+          cell2:     g(r,["Cell 2","Cell2","CELL2"]),
         };
       });
       if(!parsed.length){ setErr("Nessuna riga valida trovata. Controlla che il file abbia le colonne: Cognome, Nome, E-mail ecc."); return; }
