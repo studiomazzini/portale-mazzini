@@ -1110,12 +1110,24 @@ function ImportRateExcelModal({condId, tok, onClose}) {
         {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
       const utenti=await res.json()||[];
       const mapUtenti={};
-      utenti.forEach(u=>{if(u.interno) mapUtenti[String(u.interno).trim()]=u;});
-
-      // 2. Crea/aggiorna le rate_condominio
-      const rataIdMap={};
-      for(const rc of rateColonne){
-        // Cerca rata esistente con stesso numero
+      // Mappa per numero interno, scala, e parole del nome
+      utenti.forEach(u=>{
+        if(u.interno) mapUtenti[String(u.interno).trim().toLowerCase()]=u;
+        if(u.scala && u.scala!==u.interno) mapUtenti[String(u.scala).trim().toLowerCase()]=u;
+      });
+      // Funzione ricerca con fallback su nome
+      const trovaUtente=(unita)=>{
+        const num=String(unita).match(/^(\d+[a-zA-Z]?)/)?.[1]||"";
+        // Prova numero esatto
+        let u=mapUtenti[num.toLowerCase()]||mapUtenti[String(unita).trim().toLowerCase()];
+        if(u) return u;
+        // Prova matching per nome (parole >3 caratteri)
+        const unitaUp=String(unita).toUpperCase();
+        return utenti.find(usr=>{
+          const nome=(usr.name||usr.cognome||"").toUpperCase();
+          return nome.split(/\s+/).some(w=>w.length>3&&unitaUp.includes(w));
+        })||null;
+      };
         const r1=await fetch(SBU+"/rest/v1/rate_condominio?cond_id=eq."+condId+"&numero_rata=eq."+rc.numero_rata+"&select=id",
           {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
         const existing=await r1.json();
@@ -1144,8 +1156,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
       for(let i=0;i<righe.length;i++){
         const riga=righe[i];
         setProgress(Math.round(((i+1)/righe.length)*100));
-        const unitaNum=riga.unita.match(/^(\d+[a-zA-Z]?)/)?.[1]||riga.unita;
-        const utente=mapUtenti[unitaNum]||mapUtenti[riga.unita];
+        const utente=trovaUtente(riga.unita);
         if(!utente){skip++; continue;}
         for(const rc of rateColonne){
           const importo=parseFloat(riga.importi[rc.colonna]);
