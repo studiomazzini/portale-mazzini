@@ -721,7 +721,6 @@ function AdminImport({tok}) {
           else if(parsed.length) parsed[parsed.length-1].inquilini.push(inqData);
         }
       }
-      }
       if(!parsed.length){ setErr("Nessun proprietario trovato. Verifica che la colonna 'Tipo Cond.' contenga 'Proprietario'."); return; }
       setRows(parsed); setPreview(true);
     }catch(e){setErr("Errore: "+e.message);}
