@@ -8,65 +8,66 @@ exports.handler = async (event) => {
     fra7.setDate(fra7.getDate() + 7);
     const target = fra7.toISOString().split('T')[0];
 
-    const debug = { target, SB_ok: !!SB, KEY_ok: !!KEY, RESEND_ok: !!RESEND };
+    const h = { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Content-Type': 'application/json' };
 
-    const url = SB + '/rest/v1/rate_condomino'
-      + '?select=id,importo,notificato,profiles(nome,cognome,email_contatto),rate_condominio(data_scadenza)'
-      + '&notificato=eq.false&limit=20';
+    // 1. Trova le rate_condominio in scadenza fra 7 giorni
+    const r1 = await fetch(SB + '/rest/v1/rate_condominio?select=id&data_scadenza=eq.' + target, { headers: h });
+    const rateInScadenza = await r1.json();
+    if (!Array.isArray(rateInScadenza) || rateInScadenza.length === 0) {
+      return { statusCode: 200, body: JSON.stringify({ inviati: 0, msg: 'Nessuna rata in scadenza il ' + target }) };
+    }
 
-    const r = await fetch(url, {
-      headers: { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Content-Type': 'application/json' }
-    });
+    const rataIds = rateInScadenza.map(x => x.id).join(',');
 
-    const righe = await r.json();
-    debug.http_status = r.status;
-    debug.righe_totali = Array.isArray(righe) ? righe.length : 'ERRORE';
-    debug.sample = Array.isArray(righe) ? righe.slice(0, 3) : righe;
-    debug.date_presenti = Array.isArray(righe)
-      ? [...new Set(righe.map(x => x.rate_condominio && x.rate_condominio.data_scadenza))]
-      : [];
+    // 2. Trova gli importi non ancora notificati per quelle rate
+    const r2 = await fetch(SB + '/rest/v1/rate_condomino?select=id,importo,user_id&rata_id=in.(' + rataIds + ')&notificato=eq.false', { headers: h });
+    const importi = await r2.json();
+    if (!Array.isArray(importi) || importi.length === 0) {
+      return { statusCode: 200, body: JSON.stringify({ inviati: 0, msg: 'Tutti gia notificati o nessun importo' }) };
+    }
 
-    if (!Array.isArray(righe)) return { statusCode: 200, body: JSON.stringify(debug, null, 2) };
+    const userIds = [...new Set(importi.map(x => x.user_id))].join(',');
 
-    const daInviare = righe.filter(x => x.rate_condominio && x.rate_condominio.data_scadenza === target);
-    debug.in_scadenza_fra_7gg = daInviare.length;
+    // 3. Carica i profili con email
+    const r3 = await fetch(SB + '/rest/v1/profiles?select=id,nome,cognome,email_contatto&id=in.(' + userIds + ')', { headers: h });
+    const profili = await r3.json();
+    const profiloMap = {};
+    if (Array.isArray(profili)) profili.forEach(p => { profiloMap[p.id] = p; });
 
     let inviati = 0;
-    const log_invii = [];
+    for (const imp of importi) {
+      const profilo = profiloMap[imp.user_id];
+      if (!profilo) continue;
+      const email = profilo.email_contatto;
+      if (!email || email.includes('@noemail.local')) continue;
 
-    for (const riga of daInviare) {
-      const email = riga.profiles && riga.profiles.email_contatto;
-      if (!email || email.includes('@noemail.local')) {
-        log_invii.push({ skip: true, motivo: 'no email', nome: riga.profiles && riga.profiles.nome });
-        continue;
-      }
-      const nome = ((riga.profiles.nome || '') + ' ' + (riga.profiles.cognome || '')).trim();
-      const scad = riga.rate_condominio.data_scadenza;
+      const nome = ((profilo.nome || '') + ' ' + (profilo.cognome || '')).trim();
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + RESEND },
         body: JSON.stringify({
           from: 'noreply@studiomazzinibo.com',
           to: email,
-          subject: 'Promemoria rata condominiale - scadenza ' + scad,
-          html: '<p>Gentile ' + nome + ',</p><p>Le ricordiamo che e in scadenza il <strong>' + scad + '</strong> la sua rata condominiale di <strong>EUR ' + riga.importo + '</strong>.</p><p>Cordiali saluti,<br>Studio Amministrazioni Immobiliari Mazzini & C.</p>'
+          subject: 'Promemoria rata condominiale - scadenza ' + target,
+          html: '<p>Gentile ' + nome + ',</p>'
+            + '<p>Le ricordiamo che e in scadenza il <strong>' + target + '</strong> '
+            + 'la sua rata condominiale di importo <strong>EUR ' + imp.importo + '</strong>.</p>'
+            + '<p>Per qualsiasi informazione non esiti a contattarci.</p>'
+            + '<p>Cordiali saluti,<br>Studio Amministrazioni Immobiliari Mazzini &amp; C.</p>'
         })
       });
-      const resend_body = await res.text();
-      log_invii.push({ email, status: res.status, body: resend_body });
+
       if (res.ok) {
         inviati++;
-        await fetch(SB + '/rest/v1/rate_condomino?id=eq.' + riga.id, {
+        await fetch(SB + '/rest/v1/rate_condomino?id=eq.' + imp.id, {
           method: 'PATCH',
-          headers: { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { ...h, 'Prefer': 'return=minimal' },
           body: JSON.stringify({ notificato: true })
         });
       }
     }
 
-    debug.inviati = inviati;
-    debug.log_invii = log_invii;
-    return { statusCode: 200, body: JSON.stringify(debug, null, 2) };
+    return { statusCode: 200, body: JSON.stringify({ inviati: inviati, totale: importi.length }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ errore: err.message }) };
   }
