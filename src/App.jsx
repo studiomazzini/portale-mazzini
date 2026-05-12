@@ -675,7 +675,7 @@ function AdminImport({tok}) {
       const buf=await file.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
       const data=XLSX.utils.sheet_to_json(ws,{defval:""});
       const g=(row,names)=>{ for(const n of names){ const v=row[n]; if(v!==undefined&&String(v).trim()!=="") return String(v).trim(); } return ""; };
-      if(data.length>0) console.log("COLONNE EXCEL:",Object.keys(data[0]));
+      if(data.length>0) console.log("COLONNE EXCEL: "+Object.keys(data[0]).join(" | "));
       const parsed=data.filter(r=>g(r,["Cognome","COGNOME"])||g(r,["Nome","NOME"])).map(r=>{
         const cognome=g(r,["Cognome","COGNOME"]);
         const nome=g(r,["Nome","NOME"]);
