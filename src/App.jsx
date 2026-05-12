@@ -1128,6 +1128,8 @@ function ImportRateExcelModal({condId, tok, onClose}) {
           return nome.split(/\s+/).some(w=>w.length>3&&unitaUp.includes(w));
         })||null;
       };
+      const rataIdMap={};
+      for(const rc of rateColonne){
         const r1=await fetch(SBU+"/rest/v1/rate_condominio?cond_id=eq."+condId+"&numero_rata=eq."+rc.numero_rata+"&select=id",
           {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
         const existing=await r1.json();
