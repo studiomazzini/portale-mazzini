@@ -1144,7 +1144,8 @@ function ImportRateExcelModal({condId, tok, onClose}) {
       for(let i=0;i<righe.length;i++){
         const riga=righe[i];
         setProgress(Math.round(((i+1)/righe.length)*100));
-        const utente=mapUtenti[riga.unita];
+        const unitaNum=riga.unita.match(/^(\d+[a-zA-Z]?)/)?.[1]||riga.unita;
+        const utente=mapUtenti[unitaNum]||mapUtenti[riga.unita];
         if(!utente){skip++; continue;}
         for(const rc of rateColonne){
           const importo=parseFloat(riga.importi[rc.colonna]);
