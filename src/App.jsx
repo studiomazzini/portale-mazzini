@@ -676,52 +676,51 @@ function AdminImport({tok}) {
       const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
       const data=XLSX.utils.sheet_to_json(ws,{defval:""});
       const g=(row,names)=>{ for(const n of names){ const v=row[n]; if(v!==undefined&&String(v).trim()!=="") return String(v).trim(); } return ""; };
-      const parsed=[]; let lastProprietario=null;
+      const parsed=[]; const mapByNUn={};
       for(const r of data){
         const tipo=g(r,["Tipo Cond.","TIPO COND.","Tipo cond."]).toLowerCase().trim();
         if(!tipo) continue;
-        // Salta ex-proprietari e ex-inquilini
         if(tipo.startsWith("ex")||tipo.includes("ex.")||tipo.includes("ex ")) continue;
         const nomeCompleto=g(r,["Nome","NOME"]).trim();
         if(!nomeCompleto) continue;
-        const primoToken=nomeCompleto.split(/s+/)[0]||"Utente";
+        const nUn=g(r,["N. Un.","N.Un.","N Un","N.Un","Unita","Unita"]);
+        const primoToken=nomeCompleto.split(/\s+/)[0]||"Utente";
         const token=primoToken.charAt(0).toUpperCase()+primoToken.slice(1,4).toLowerCase();
         const mese=String(new Date().getMonth()+1).padStart(2,"0");
         const persona={
-          nomeCompleto, tipo,
+          nomeCompleto, tipo, nUn,
           isProprietario: tipo.includes("proprietario"),
           isInquilino:    tipo.includes("inquilino"),
-          presso:   g(r,["Presso","PRESSO","C/O"]),
-          via:      g(r,["Via","VIA"]),
-          cap:      g(r,["CAP","Cap"]),
-          localita: g(r,["Località","Localita","Città","Citta"]),
-          prov:     g(r,["Prov.","PROV","Prov"]),
-          percPoss: g(r,["% Poss.","% Poss","Poss.","POSS"]),
-          percRate: g(r,["% Rate","% rate","Rate","RATE"]),
+          presso:    g(r,["Presso","PRESSO","C/O"]),
+          via:       g(r,["Via","VIA"]),
+          cap:       g(r,["CAP","Cap"]),
+          localita:  g(r,["Localita","Localita","Citta","Citta"]),
+          prov:      g(r,["Prov.","PROV","Prov"]),
+          percPoss:  g(r,["% Poss.","% Poss","Poss.","POSS"]),
+          percRate:  g(r,["% Rate","% rate","Rate","RATE"]),
           percDetraz:g(r,["% Detraz","% Detraz.","Detraz","DETRAZ"]),
-          cf:       g(r,["Codice Fiscale","CF","CODICE FISCALE"]),
-          dataNasc: g(r,["Data Nascita","DATA NASCITA","Data nasc."]),
-          telefono: g(r,["Telefono","TEL","Tel","Tel 1","Tel."]),
-          tel2:     g(r,["Tel 2","Tel2","TEL2","Telefono 2"]),
-          cell:     g(r,["Cellulare","Cell","CELL","Cell 1","Cell."]),
-          cell2:    g(r,["Cell 2","Cell2","CELL2","Cellulare 2"]),
-          fax:      g(r,["Fax","FAX"]),
-          email:    g(r,["Email","EMAIL","E-mail","email 1","Email 1"]),
-          email2:   g(r,["Email 2","EMAIL 2","E-mail 2","email 2"]),
-          password: token+mese+"!",
-          inquilini:[]
+          cf:        g(r,["Codice Fiscale","CF","CODICE FISCALE"]),
+          dataNasc:  g(r,["Data Nascita","DATA NASCITA","Data nasc."]),
+          telefono:  g(r,["Telefono","TEL","Tel","Tel 1","Tel."]),
+          tel2:      g(r,["Tel 2","Tel2","TEL2","Telefono 2"]),
+          cell:      g(r,["Cellulare","Cell","CELL","Cell 1","Cell."]),
+          cell2:     g(r,["Cell 2","Cell2","CELL2","Cellulare 2"]),
+          fax:       g(r,["Fax","FAX"]),
+          email:     g(r,["Email","EMAIL","E-mail","email 1","Email 1"]),
+          email2:    g(r,["Email 2","EMAIL 2","E-mail 2","email 2"]),
+          password:  token+mese+"!",
+          inquilini: []
         };
         if(persona.isProprietario){
           parsed.push(persona);
-          lastProprietario=persona;
-        } else if(persona.isInquilino&&lastProprietario){
-          lastProprietario.inquilini.push({
-            nome:nomeCompleto,
-            email:persona.email,
-            tel:persona.telefono,
-            email2:persona.email2
-          });
+          if(nUn) mapByNUn[nUn]=persona;
+        } else if(persona.isInquilino){
+          const inqData={nome:nomeCompleto,email:persona.email,tel:persona.telefono,email2:persona.email2};
+          const propr=nUn?mapByNUn[nUn]:null;
+          if(propr) propr.inquilini.push(inqData);
+          else if(parsed.length) parsed[parsed.length-1].inquilini.push(inqData);
         }
+      }
       }
       if(!parsed.length){ setErr("Nessun proprietario trovato. Verifica che la colonna 'Tipo Cond.' contenga 'Proprietario'."); return; }
       setRows(parsed); setPreview(true);
