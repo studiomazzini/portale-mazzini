@@ -441,13 +441,111 @@ function AdminPanel({user,onLogout,view,setView}) {
 function CondominioModal({mode,data,onSave,onClose}) {
   const [f,setF]=useState(data); const s=(k,v)=>setF(p=>({...p,[k]:v}));
   return (
-    <Modal title={mode==="add"?"Nuovo Condominio":"Modifica Condominio"} onClose={onClose}>
-      <Inp label="Nome" value={f.nome} onChange={e=>s("nome",e.target.value)} placeholder="Es. Cond. Via Parma 5"/>
-      <Inp label="Indirizzo" value={f.indirizzo} onChange={e=>s("indirizzo",e.target.value)}/>
-      <div className="flex gap-3"><div style={{width:"38%"}}><Inp label="CAP" value={f.cap} onChange={e=>s("cap",e.target.value)}/></div><div className="flex-1"><Inp label="Città" value={f.citta} onChange={e=>s("citta",e.target.value)}/></div></div>
-      <Inp label="Telefono (opzionale)" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)} placeholder="Es. 051 452244"/>
-      <Inp label="Email di contatto (opzionale)" type="email" value={f.email_contatto||""} onChange={e=>s("email_contatto",e.target.value)}/>
-      <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)} disabled={!f.nome}>Salva</Btn></div>
+    <Modal title={mode==="add"?"Nuovo Stabile":"Modifica Stabile"} onClose={onClose}>
+      <div className="flex gap-3">
+        <div style={{width:"30%"}}><Inp label="Codice" value={f.codice||""} onChange={e=>s("codice",e.target.value)} placeholder="Es. 001"/></div>
+        <div className="flex-1"><Inp label="Nome Stabile" value={f.nome||""} onChange={e=>s("nome",e.target.value)} placeholder="Es. Cond. Via Parma 5"/></div>
+      </div>
+      <Inp label="Codice Fiscale" value={f.cod_fiscale||""} onChange={e=>s("cod_fiscale",e.target.value)}/>
+      <Inp label="Via" value={f.via||""} onChange={e=>s("via",e.target.value)}/>
+      <div className="flex gap-3">
+        <div style={{width:"30%"}}><Inp label="CAP" value={f.cap||""} onChange={e=>s("cap",e.target.value)}/></div>
+        <div className="flex-1"><Inp label="Località" value={f.localita||""} onChange={e=>s("localita",e.target.value)}/></div>
+      </div>
+      <Inp label="Istituto Bancario" value={f.istituto||""} onChange={e=>s("istituto",e.target.value)}/>
+      <Inp label="IBAN" value={f.iban||""} onChange={e=>s("iban",e.target.value)} placeholder="IT00 X000 0000 0000 0000 0000 000"/>
+      <div className="flex gap-3">
+        <div style={{width:"30%"}}><Inp label="SIA" value={f.sia||""} onChange={e=>s("sia",e.target.value)}/></div>
+        <div style={{width:"30%"}}><Inp label="Unità" type="number" value={f.unita||""} onChange={e=>s("unita",e.target.value)}/></div>
+      </div>
+      <div className="flex gap-3">
+        <div className="flex-1"><Inp label="Inizio Esercizio" type="date" value={f.ini_ese||""} onChange={e=>s("ini_ese",e.target.value)}/></div>
+        <div className="flex-1"><Inp label="Fine Esercizio" type="date" value={f.fine_ese||""} onChange={e=>s("fine_ese",e.target.value)}/></div>
+      </div>
+      <div className="flex justify-end gap-3 pt-2">
+        <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+        <Btn onClick={()=>f.nome&&onSave(f)} disabled={!f.nome}>Salva</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+
+// ── Import Stabili da Excel ───────────────────────────────────────────────────
+function ImportStabiliModal({tok,onClose}) {
+  const [rows,setRows]=useState([]); const [preview,setPreview]=useState(false);
+  const [importing,setImporting]=useState(false); const [err,setErr]=useState(""); const [done,setDone]=useState(false);
+
+  const parseExcel=async xfile=>{
+    setErr(""); setRows([]); setPreview(false); setDone(false);
+    try{
+      const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
+      const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
+      const data=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const g=(row,names)=>{ for(const n of names){ const v=row[n]; if(v!==undefined&&String(v).trim()!=="") return String(v).trim(); } return ""; };
+      const parsed=data.filter(r=>g(r,["Stabile","STABILE","Nome"])).map(r=>({
+        codice:    g(r,["Cod.","COD","Cod","Codice"]),
+        nome:      g(r,["Stabile","STABILE","Nome"]),
+        cod_fiscale:g(r,["Cod. Fisc.","Cod.Fisc.","CODICE FISCALE","CF"]),
+        istituto:  g(r,["Istituto","ISTITUTO","Banca"]),
+        iban:      g(r,["IBAN","Iban"]),
+        sia:       g(r,["SIA","Sia"]),
+        unita:     g(r,["Unita","Unità","UNITA","N. Unità"]),
+        ini_ese:   g(r,["Ini. Ese.","Ini.Ese.","Inizio Ese.","INIZIO"]),
+        fine_ese:  g(r,["Fine Ese.","Fine.Ese.","Fine Ese","FINE"]),
+        via:       g(r,["Via","VIA"]),
+        cap:       g(r,["CAP","Cap"]),
+        localita:  g(r,["Località","Localita","Citta","Città"]),
+      }));
+      if(!parsed.length){setErr("Nessuno stabile trovato. Verifica la colonna 'Stabile'."); return;}
+      setRows(parsed); setPreview(true);
+    }catch(e){setErr("Errore: "+e.message);}
+  };
+
+  const doImport=async()=>{
+    setImporting(true);
+    let imp=0, fail=0;
+    for(const r of rows){
+      try{
+        await POST("condominii",{
+          nome:r.nome, codice:r.codice||null, cod_fiscale:r.cod_fiscale||null,
+          istituto:r.istituto||null, iban:r.iban||null, sia:r.sia||null,
+          unita:r.unita?Number(r.unita):null,
+          ini_ese:r.ini_ese||null, fine_ese:r.fine_ese||null,
+          via:r.via||null, cap:r.cap||null, localita:r.localita||null
+        },tok);
+        imp++;
+      }catch(e){fail++; console.error(r.nome,e.message);}
+    }
+    setImporting(false); setDone(true);
+    alert(imp+" stabili importati"+(fail>0?" · "+fail+" errori":"")+".");
+  };
+
+  return (
+    <Modal title="Importa Stabili da Excel" onClose={onClose}>
+      <p className="text-xs text-gray-400 mb-3">Colonne attese: Cod. · Stabile · Cod. Fisc. · Istituto · IBAN · SIA · Unita · Ini. Ese. · Fine Ese. · Via · CAP · Località</p>
+      <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 mb-3"/>
+      <ErrBox msg={err}/>
+      {preview&&rows.length>0&&!done&&(
+        <>
+          <div className="max-h-48 overflow-y-auto border border-gray-100 rounded-xl mb-3">
+            {rows.map((r,i)=>(
+              <div key={i} className={"flex items-center justify-between px-3 py-2 text-sm "+(i<rows.length-1?"border-b border-gray-50":"")}>
+                <div>
+                  <span className="font-medium text-gray-800">{r.codice?<span className="text-gray-400 mr-1">#{r.codice}</span>:null}{r.nome}</span>
+                  <span className="text-xs text-gray-400 ml-2">{r.via} {r.localita}</span>
+                </div>
+                {r.iban&&<span className="text-xs text-gray-400 font-mono">{r.iban.slice(0,12)}…</span>}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-3">
+            <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+            <Btn onClick={doImport} disabled={importing}>{importing?"Importazione...":"Importa "+rows.length+" stabili"}</Btn>
+          </div>
+        </>
+      )}
+      {done&&<div className="flex justify-end"><Btn onClick={onClose}>Chiudi</Btn></div>}
     </Modal>
   );
 }
@@ -456,17 +554,18 @@ function AdminCondominii({tok}) {
   const {data:list,loading,err,reload}=useData(()=>GET("condominii","select=*&order=nome",tok),[tok]);
   const [modal,setModal]=useState(null);
   const [expanded,setExpanded]=useState(null);
+  const [importStabili,setImportStabili]=useState(false);
   const save=async f=>{ try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("condominii",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div><h2 className="text-2xl font-black text-gray-800">Gestione Condomìni</h2><p className="text-gray-400 text-sm">{list?.length||0} condomìni</p></div>
-        <Btn onClick={()=>setModal({mode:"add",data:{nome:"",indirizzo:"",cap:"",citta:"",telefono:"",email_contatto:""}})}>+ Nuovo</Btn>
+        <div><h2 className="text-2xl font-black text-gray-800">Gestione Stabili</h2><p className="text-gray-400 text-sm">{list?.length||0} stabili</p></div>
+        <div className="flex gap-2"><Btn variant="secondary" onClick={()=>setImportStabili(true)}>📥 Importa Excel</Btn><Btn onClick={()=>setModal({mode:"add",data:{nome:"",codice:"",cod_fiscale:"",via:"",cap:"",localita:"",istituto:"",iban:"",sia:"",unita:"",ini_ese:"",fine_ese:""}})}>+ Nuovo</Btn></div>
       </div>
       <ErrBox msg={err}/>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading?<Spinner/>:!list?.length?<EmptyState icon="🏢" text="Nessun condominio."/>:list.map((c,i)=>(
+        {loading?<Spinner/>:!list?.length?<EmptyState icon="🏢" text="Nessun stabile."/>:list.map((c,i)=>(
           <div key={c.id}>
             <div className={`flex items-center justify-between p-5 ${i<list.length-1||expanded===c.id?"border-b border-gray-50":""}`}>
               <div className="flex items-center gap-4">
@@ -489,6 +588,7 @@ function AdminCondominii({tok}) {
         ))}
       </div>
       {modal&&<CondominioModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
+      {importStabili&&<ImportStabiliModal tok={tok} onClose={()=>{setImportStabili(false);reload();}}/>}
     </div>
   );
 }
@@ -1258,7 +1358,7 @@ function AdminScadenze({tok}) {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div><h2 className="text-2xl font-black text-gray-800">Rate in Scadenza</h2><p className="text-gray-400 text-sm">Scadenze nei prossimi 15 giorni — tutti i condomìni</p></div>
+        <div><h2 className="text-2xl font-black text-gray-800">Rate in Scadenza</h2><p className="text-gray-400 text-sm">Scadenze nei prossimi 15 giorni — tutti i stabili</p></div>
         <Btn variant="secondary" onClick={load}>↺ Aggiorna</Btn>
       </div>
       {loading?<Spinner/>:!righe.length?<div className="bg-white rounded-2xl border border-gray-100 shadow-sm"><EmptyState icon="✅" text="Nessuna rata in scadenza nei prossimi 15 giorni."/></div>
