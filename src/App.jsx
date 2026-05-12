@@ -1026,6 +1026,166 @@ function RataModal({mode,data,onSave,onClose}) {
   );
 }
 
+
+// ── Import Rate da Excel ──────────────────────────────────────────────────────
+function ImportRateExcelModal({condId, tok, onClose}) {
+  const SBU = import.meta.env.VITE_SUPABASE_URL;
+  const SBK = import.meta.env.VITE_SUPABASE_KEY;
+  const [rateColonne,setRateColonne]=useState([]); // [{colonna, numero_rata, data_scadenza}]
+  const [righe,setRighe]=useState([]); // [{unita, importi:{colonna:valore}}]
+  const [preview,setPreview]=useState(false);
+  const [importing,setImporting]=useState(false);
+  const [progress,setProgress]=useState(0);
+  const [err,setErr]=useState("");
+
+  const parseData=(str)=>{
+    // Estrae data da stringhe tipo "entro 17/06/25" o "entro 15/11/2025"
+    const m=str.match(/(d{1,2})[/-](d{1,2})[/-](d{2,4})/);
+    if(!m) return "";
+    let [,g,mm,a]=m;
+    if(a.length===2) a="20"+a;
+    return a+"-"+mm.padStart(2,"0")+"-"+g.padStart(2,"0");
+  };
+
+  const parseNumeroRata=(str)=>{
+    const m=str.match(/([1-9])s*[°oa°]/i) || str.match(/^([1-9])/);
+    return m?Number(m[1]):null;
+  };
+
+  const parseExcel=async xfile=>{
+    setErr(""); setRateColonne([]); setRighe([]); setPreview(false);
+    try{
+      const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
+      const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
+      const data=XLSX.utils.sheet_to_json(ws,{defval:""});
+      if(!data.length){setErr("File vuoto."); return;}
+
+      const colonne=Object.keys(data[0]);
+      const unitaCol=colonne.find(k=>k.toLowerCase().includes("unit")||k.toLowerCase()==="interno")||colonne[0];
+
+      // Identifica le colonne rata (tutte tranne Unità)
+      const rataCols=colonne.filter(k=>k!==unitaCol).map((k,i)=>{
+        const data_scadenza=parseData(k);
+        const numero_rata=parseNumeroRata(k)||i+1;
+        return {colonna:k, numero_rata, data_scadenza, descrizione:k};
+      }).filter(r=>r.data_scadenza);
+
+      if(!rataCols.length){setErr("Nessuna colonna rata trovata. Assicurati che le intestazioni contengano date tipo '17/06/25'."); return;}
+
+      const righeP=data.filter(r=>String(r[unitaCol]||"").trim()).map(r=>({
+        unita:String(r[unitaCol]).trim(),
+        importi:Object.fromEntries(rataCols.map(rc=>[rc.colonna, String(r[rc.colonna]||"").replace(/[€s]/g,"").replace(",",".")]))
+      })).filter(r=>r.unita&&rataCols.some(rc=>parseFloat(r.importi[rc.colonna])>0));
+
+      setRateColonne(rataCols);
+      setRighe(righeP);
+      setPreview(true);
+    }catch(e){setErr("Errore: "+e.message);}
+  };
+
+  const doImport=async()=>{
+    setImporting(true); setProgress(0);
+    try{
+      // 1. Carica utenti del condominio
+      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=eq.condomino&select=id,interno,name",
+        {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
+      const utenti=await res.json()||[];
+      const mapUtenti={};
+      utenti.forEach(u=>{if(u.interno) mapUtenti[String(u.interno).trim()]=u;});
+
+      // 2. Crea/aggiorna le rate_condominio
+      const rataIdMap={};
+      for(const rc of rateColonne){
+        // Cerca rata esistente con stesso numero
+        const r1=await fetch(SBU+"/rest/v1/rate_condominio?cond_id=eq."+condId+"&numero_rata=eq."+rc.numero_rata+"&select=id",
+          {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
+        const existing=await r1.json();
+        if(existing&&existing.length>0){
+          rataIdMap[rc.colonna]=existing[0].id;
+          // Aggiorna la data se diversa
+          await fetch(SBU+"/rest/v1/rate_condominio?id=eq."+existing[0].id,{
+            method:"PATCH",
+            headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=minimal"},
+            body:JSON.stringify({data_scadenza:rc.data_scadenza,descrizione:rc.descrizione})
+          });
+        } else {
+          // Crea nuova rata
+          const r2=await fetch(SBU+"/rest/v1/rate_condominio",{
+            method:"POST",
+            headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=representation"},
+            body:JSON.stringify({cond_id:Number(condId),numero_rata:rc.numero_rata,data_scadenza:rc.data_scadenza,descrizione:rc.descrizione})
+          });
+          const nuova=await r2.json();
+          rataIdMap[rc.colonna]=nuova[0]?.id;
+        }
+      }
+
+      // 3. Importa importi per ogni utente
+      let imp=0, skip=0;
+      for(let i=0;i<righe.length;i++){
+        const riga=righe[i];
+        setProgress(Math.round(((i+1)/righe.length)*100));
+        const utente=mapUtenti[riga.unita];
+        if(!utente){skip++; continue;}
+        for(const rc of rateColonne){
+          const importo=parseFloat(riga.importi[rc.colonna]);
+          if(isNaN(importo)||importo===0) continue;
+          const rataId=rataIdMap[rc.colonna];
+          if(!rataId) continue;
+          // Upsert importo
+          await fetch(SBU+"/rest/v1/rate_condomino?on_conflict=rata_id,user_id",{
+            method:"POST",
+            headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=minimal,resolution=merge-duplicates"},
+            body:JSON.stringify({rata_id:rataId,user_id:utente.id,importo,notificato:false})
+          });
+          imp++;
+        }
+      }
+      alert("Importazione completata: "+imp+" importi caricati"+(skip>0?", "+skip+" unità non trovate":"")+".");
+      onClose();
+    }catch(e){alert("Errore: "+e.message);}
+    setImporting(false);
+  };
+
+  return (
+    <Modal title="Importa Rate da Excel" onClose={onClose}>
+      <p className="text-xs text-gray-400 mb-3">
+        Il file deve avere una colonna <strong>Unità</strong> e una colonna per ogni rata con la data nella intestazione (es. "1° Rata entro 17/06/25").
+      </p>
+      <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 mb-3"/>
+      <ErrBox msg={err}/>
+      {preview&&rateColonne.length>0&&(
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Rate rilevate ({rateColonne.length})</p>
+          <div className="flex gap-2 flex-wrap mb-3">
+            {rateColonne.map((rc,i)=>(
+              <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
+                Rata {rc.numero_rata} · {new Date(rc.data_scadenza).toLocaleDateString("it-IT")}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Unità trovate ({righe.length})</p>
+          <div className="max-h-40 overflow-y-auto border border-gray-100 rounded-xl mb-3">
+            {righe.map((r,i)=>(
+              <div key={i} className={"flex items-center justify-between px-3 py-2 text-sm "+(i<righe.length-1?"border-b border-gray-50":"")}>
+                <span className="font-medium text-gray-700">Int. {r.unita}</span>
+                <span className="text-xs text-gray-400">
+                  {rateColonne.map(rc=>"€"+r.importi[rc.colonna]).join(" · ")}
+                </span>
+              </div>
+            ))}
+          </div>
+          {importing&&<div className="h-1 bg-gray-100 rounded mb-2"><div className="h-1 bg-blue-500 transition-all rounded" style={{width:progress+"%"}}/></div>}
+          <div className="flex justify-end gap-3">
+            <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+            <Btn onClick={doImport} disabled={importing}>{importing?"Importazione "+progress+"%...":"Importa "+righe.length+" unità"}</Btn>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function BulkImportiModal({condId,rate,tok,onClose}) {
   const [users,setUsers]=useState([]); const [vals,setVals]=useState({}); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false);
   useEffect(()=>{
@@ -1156,7 +1316,7 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
 function AdminRate({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(""); const [rate,setRate]=useState([]); const [loading,setLoading]=useState(false);
-  const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false);
+  const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false); const [importRateModal,setImportRateModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
   useEffect(()=>{ loadRate(); },[selCond,tok]);
   const loadRate=async()=>{ if(!selCond) return; setLoading(true); try{setRate(await GET("rate_condominio",`cond_id=eq.${selCond}&select=*&order=numero_rata`,tok)||[]);}catch(e){} setLoading(false); };
@@ -1176,6 +1336,7 @@ function AdminRate({tok}) {
           <Btn variant="warning" onClick={sendReminders} disabled={sending}>{sending?"Invio...":"📧 Invia promemoria"}</Btn>
           {rate.length>0&&<Btn variant="secondary" onClick={()=>setBulkModal(true)}>📊 Gestisci importi</Btn>}
           {rate.length<5&&<Btn onClick={()=>setModal({mode:"add",data:{numero_rata:rate.length+1,data_scadenza:"",descrizione:""}})}>+ Rata</Btn>}
+          <Btn variant="secondary" onClick={()=>setImportRateModal(true)}>📥 Importa Excel</Btn>
         </div>
       </div>
       <div className="mb-5"><Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>{condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}</Sel></div>
@@ -1197,6 +1358,7 @@ function AdminRate({tok}) {
       {modal&&<RataModal mode={modal.mode} data={modal.data} onSave={saveRata} onClose={()=>setModal(null)}/>}
       {importModal&&<ImportImportiModal rata={importModal} condId={selCond} tok={tok} onClose={()=>setImportModal(null)}/>}
       {bulkModal&&<BulkImportiModal condId={selCond} rate={rate} tok={tok} onClose={()=>setBulkModal(false)}/>}
+      {importRateModal&&<ImportRateExcelModal condId={selCond} tok={tok} onClose={()=>{setImportRateModal(false);loadRate();}}/>}
     </div>
   );
 }
