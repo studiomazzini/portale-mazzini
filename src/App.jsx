@@ -408,7 +408,6 @@ function AdminPanel({user,onLogout,view,setView}) {
     {id:"condominii",  label:"Condomìni",      icon:"🏢"},
     {id:"utenti",      label:"Utenti",          icon:"👥"},
     {id:"importa",     label:"Importa Excel",   icon:"📥"},
-    {id:"inquilini",   label:"Inquilini",        icon:"🏠"},
     {id:"rate",        label:"Rate",             icon:"📅"},
     {id:"documenti",   label:"Documenti",        icon:"📁"},
     {id:"generali",    label:"Doc. Generali",    icon:"📋"},
@@ -423,7 +422,6 @@ function AdminPanel({user,onLogout,view,setView}) {
           {view==="condominii"   && <AdminCondominii tok={user.token}/>}
           {view==="utenti"       && <AdminUtenti tok={user.token}/>}
           {view==="importa"      && <AdminImport tok={user.token}/>}
-          {view==="inquilini"    && <AdminInquilini tok={user.token}/>}
           {view==="rate"         && <AdminRate tok={user.token}/>}
           {view==="documenti"    && <AdminDocumenti tok={user.token}/>}
           {view==="generali"     && <AdminGeneralDocs tok={user.token}/>}
@@ -443,6 +441,10 @@ function CondominioModal({mode,data,onSave,onClose}) {
       <Inp label="Nome" value={f.nome} onChange={e=>s("nome",e.target.value)} placeholder="Es. Cond. Via Parma 5"/>
       <Inp label="Indirizzo" value={f.indirizzo} onChange={e=>s("indirizzo",e.target.value)}/>
       <div className="flex gap-3"><div style={{width:"38%"}}><Inp label="CAP" value={f.cap} onChange={e=>s("cap",e.target.value)}/></div><div className="flex-1"><Inp label="Città" value={f.citta} onChange={e=>s("citta",e.target.value)}/></div></div>
+      <Inp label="Telefono (opzionale)" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)} placeholder="Es. 051 452244"/>
+      <Inp label="Email di contatto (opzionale)" type="email" value={f.email_contatto||""} onChange={e=>s("email_contatto",e.target.value)}/>
+      <Inp label="Telefono (opzionale)" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)} placeholder="Es. 051 452244"/>
+      <Inp label="Email di contatto (opzionale)" type="email" value={f.email_contatto||""} onChange={e=>s("email_contatto",e.target.value)}/>
       <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)} disabled={!f.nome}>Salva</Btn></div>
     </Modal>
   );
@@ -451,30 +453,150 @@ function CondominioModal({mode,data,onSave,onClose}) {
 function AdminCondominii({tok}) {
   const {data:list,loading,err,reload}=useData(()=>GET("condominii","select=*&order=nome",tok),[tok]);
   const [modal,setModal]=useState(null);
+  const [expanded,setExpanded]=useState(null);
   const save=async f=>{ try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("condominii",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div><h2 className="text-2xl font-black text-gray-800">Gestione Condomìni</h2><p className="text-gray-400 text-sm">{list?.length||0} condomìni</p></div>
-        <Btn onClick={()=>setModal({mode:"add",data:{nome:"",indirizzo:"",cap:"",citta:""}})}>+ Nuovo</Btn>
+        <Btn onClick={()=>setModal({mode:"add",data:{nome:"",indirizzo:"",cap:"",citta:"",telefono:"",email_contatto:""}})}>+ Nuovo</Btn>
       </div>
       <ErrBox msg={err}/>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading?<Spinner/>:!list?.length?<EmptyState icon="🏢" text="Nessun condominio."/>:list.map((c,i)=>(
-          <div key={c.id} className={`flex items-center justify-between p-5 ${i<list.length-1?"border-b border-gray-50":""}`}>
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
-              <div><p className="font-semibold text-gray-800">{c.nome}</p><p className="text-xs text-gray-400">{c.indirizzo} · {c.cap} {c.citta}</p></div>
+          <div key={c.id}>
+            <div className={`flex items-center justify-between p-5 ${i<list.length-1||expanded===c.id?"border-b border-gray-50":""}`}>
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
+                <div>
+                  <p className="font-semibold text-gray-800">{c.nome}</p>
+                  <p className="text-xs text-gray-400">{c.indirizzo} · {c.cap} {c.citta}</p>
+                  {c.telefono&&<p className="text-xs text-gray-400">📞 {c.telefono}</p>}
+                  {c.email_contatto&&<p className="text-xs text-gray-400">✉️ {c.email_contatto}</p>}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Btn variant="secondary" onClick={()=>setExpanded(expanded===c.id?null:c.id)}>{expanded===c.id?"▲ Inquilini":"▼ Inquilini"}</Btn>
+                <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...c}})}>Modifica</Btn>
+                <Btn variant="danger" onClick={()=>remove(c.id)}>Elimina</Btn>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...c}})}>Modifica</Btn>
-              <Btn variant="danger" onClick={()=>remove(c.id)}>Elimina</Btn>
-            </div>
+            {expanded===c.id&&<InlineInquilini condId={c.id} tok={tok}/>}
           </div>
         ))}
       </div>
       {modal&&<CondominioModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
+    </div>
+  );
+}
+
+// ── Inquilini inline per condominio ──────────────────────────────────────────
+function InlineInquilini({condId,tok}) {
+  const [users,setUsers]=useState([]); const [inqMap,setInqMap]=useState({});
+  const [loading,setLoading]=useState(true); const [modal,setModal]=useState(null);
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=name",tok)||[];
+      setUsers(us);
+      if(us.length){
+        const ids=us.map(u=>u.id).join(",");
+        const inq=await GET("inquilini","user_id=in.("+ids+")&select=*",tok)||[];
+        const map={};
+        us.forEach(u=>{ map[u.id]=inq.filter(i=>i.user_id===u.id); });
+        setInqMap(map);
+      }
+    }catch(e){console.error(e);}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[condId,tok]);
+  const save=async f=>{
+    try{ modal.mode==="add"?await POST("inquilini",f,tok):await PATCH("inquilini","id=eq."+f.id,f,tok); setModal(null); load(); }catch(e){alert(e.message);}
+  };
+  const remove=async id=>{ if(window.confirm("Eliminare inquilino?")){ try{await DEL("inquilini","id=eq."+id,tok); load();}catch(e){alert(e.message);} } };
+  if(loading) return <div className="px-5 py-4 bg-slate-50"><Spinner/></div>;
+  if(!users.length) return <div className="px-5 py-3 bg-slate-50 text-sm text-gray-400">Nessun condomino registrato in questo condominio.</div>;
+  return (
+    <div className="bg-slate-50 border-t border-gray-100 px-5 py-4">
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Inquilini per condomino</p>
+      {users.map(u=>(
+        <div key={u.id} className="mb-4 last:mb-0">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-gray-700">Int. {u.interno} — {u.name}</span>
+            <Btn variant="secondary" onClick={()=>setModal({mode:"add",data:{user_id:u.id,nome:"",email:"",tel:"",dal:"",al:""}})}>+ Inquilino</Btn>
+          </div>
+          {(inqMap[u.id]||[]).length===0&&<p className="text-xs text-gray-400 ml-2 mb-1">Nessun inquilino.</p>}
+          {(inqMap[u.id]||[]).map(i=>(
+            <div key={i.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 mb-1 border border-gray-100">
+              <div>
+                <p className="text-sm font-medium text-gray-800">{i.nome}</p>
+                <p className="text-xs text-gray-400">{i.email||""}{i.tel?" · "+i.tel:""}{i.dal?" · Dal "+new Date(i.dal).toLocaleDateString("it-IT"):""}{i.al?" al "+new Date(i.al).toLocaleDateString("it-IT"):" (in corso)"}</p>
+              </div>
+              <div className="flex gap-2">
+                <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...i}})}>✏️</Btn>
+                <Btn variant="danger" onClick={()=>remove(i.id)}>🗑</Btn>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      {modal&&<InqModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
+    </div>
+  );
+}
+
+// ── Inquilini inline per condominio ──────────────────────────────────────────
+function InlineInquilini({condId,tok}) {
+  const [users,setUsers]=useState([]); const [inqMap,setInqMap]=useState({});
+  const [loading,setLoading]=useState(true); const [modal,setModal]=useState(null);
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=name",tok)||[];
+      setUsers(us);
+      if(us.length){
+        const ids=us.map(u=>u.id).join(",");
+        const inq=await GET("inquilini","user_id=in.("+ids+")&select=*",tok)||[];
+        const map={};
+        us.forEach(u=>{ map[u.id]=inq.filter(i=>i.user_id===u.id); });
+        setInqMap(map);
+      }
+    }catch(e){console.error(e);}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[condId,tok]);
+  const save=async f=>{
+    try{ modal.mode==="add"?await POST("inquilini",f,tok):await PATCH("inquilini","id=eq."+f.id,f,tok); setModal(null); load(); }catch(e){alert(e.message);}
+  };
+  const remove=async id=>{ if(window.confirm("Eliminare inquilino?")){ try{await DEL("inquilini","id=eq."+id,tok); load();}catch(e){alert(e.message);} } };
+  if(loading) return <div className="px-5 py-4 bg-slate-50"><Spinner/></div>;
+  if(!users.length) return <div className="px-5 py-3 bg-slate-50 text-sm text-gray-400">Nessun condomino registrato in questo condominio.</div>;
+  return (
+    <div className="bg-slate-50 border-t border-gray-100 px-5 py-4">
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Inquilini per condomino</p>
+      {users.map(u=>(
+        <div key={u.id} className="mb-4 last:mb-0">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-gray-700">Int. {u.interno} — {u.name}</span>
+            <Btn variant="secondary" onClick={()=>setModal({mode:"add",data:{user_id:u.id,nome:"",email:"",tel:"",dal:"",al:""}})}>+ Inquilino</Btn>
+          </div>
+          {(inqMap[u.id]||[]).length===0&&<p className="text-xs text-gray-400 ml-2 mb-1">Nessun inquilino.</p>}
+          {(inqMap[u.id]||[]).map(i=>(
+            <div key={i.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 mb-1 border border-gray-100">
+              <div>
+                <p className="text-sm font-medium text-gray-800">{i.nome}</p>
+                <p className="text-xs text-gray-400">{i.email||""}{i.tel?" · "+i.tel:""}{i.dal?" · Dal "+new Date(i.dal).toLocaleDateString("it-IT"):""}{i.al?" al "+new Date(i.al).toLocaleDateString("it-IT"):" (in corso)"}</p>
+              </div>
+              <div className="flex gap-2">
+                <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...i}})}>✏️</Btn>
+                <Btn variant="danger" onClick={()=>remove(i.id)}>🗑</Btn>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      {modal&&<InqModal mode={modal.mode} data={modal.data} onSave={save} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
@@ -759,6 +881,156 @@ function RataModal({mode,data,onSave,onClose}) {
   );
 }
 
+function BulkImportiModal({condId,rate,tok,onClose}) {
+  const [users,setUsers]=useState([]); const [vals,setVals]=useState({}); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false);
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      try{
+        const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=name",tok)||[];
+        setUsers(us);
+        const existing={};
+        if(us.length){
+          for(const r of rate){
+            const ids=us.map(u=>u.id).join(",");
+            const imp=await GET("rate_condomino","rata_id=eq."+r.id+"&user_id=in.("+ids+")&select=*",tok)||[];
+            imp.forEach(i=>{ existing[r.id+":"+i.user_id]=String(i.importo||""); });
+          }
+        }
+        setVals(existing);
+      }catch(e){console.error(e);}
+      setLoading(false);
+    })();
+  },[condId,rate,tok]);
+  const setVal=(rataId,userId,v)=>setVals(p=>({...p,[rataId+":"+userId]:v}));
+  const save=async()=>{
+    setSaving(true);
+    try{
+      for(const r of rate){
+        for(const u of users){
+          const key=r.id+":"+u.id;
+          const imp=parseFloat((vals[key]||"").replace(",","."));
+          if(!isNaN(imp)&&imp>0) await UPS("rate_condomino",{rata_id:r.id,user_id:u.id,importo:imp,notificato:false},tok);
+        }
+      }
+      alert("Importi salvati correttamente!");
+      onClose();
+    }catch(e){alert(e.message);}
+    setSaving(false);
+  };
+  return (
+    <Modal title="Gestione importi — tutte le rate" onClose={onClose}>
+      {loading?<Spinner/>:(
+        <>
+          <p className="text-xs text-gray-400 mb-3">Inserisci o modifica gli importi per ogni condomino e ogni rata. Lascia vuoto per non modificare.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-2 pr-4 text-gray-600 font-semibold min-w-32">Condomino</th>
+                  {rate.map(r=><th key={r.id} className="text-center py-2 px-2 text-gray-600 font-semibold whitespace-nowrap">Rata {r.numero_rata}<br/><span className="font-normal text-xs text-gray-400">{new Date(r.data_scadenza).toLocaleDateString("it-IT")}</span></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u=>(
+                  <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-2 pr-4 text-gray-800 text-sm font-medium whitespace-nowrap">Int.{u.interno} {u.name}</td>
+                    {rate.map(r=>(
+                      <td key={r.id} className="py-1 px-1 text-center">
+                        <input type="text" value={vals[r.id+":"+u.id]||""} onChange={e=>setVal(r.id,u.id,e.target.value)}
+                          className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-center text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" placeholder="€"/>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+            <Btn onClick={save} disabled={saving}>{saving?"Salvataggio...":"Salva tutti gli importi"}</Btn>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function BulkImportiModal({condId,rate,tok,onClose}) {
+  const [users,setUsers]=useState([]); const [vals,setVals]=useState({}); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false);
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      try{
+        const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=name",tok)||[];
+        setUsers(us);
+        const existing={};
+        if(us.length){
+          for(const r of rate){
+            const ids=us.map(u=>u.id).join(",");
+            const imp=await GET("rate_condomino","rata_id=eq."+r.id+"&user_id=in.("+ids+")&select=*",tok)||[];
+            imp.forEach(i=>{ existing[r.id+":"+i.user_id]=String(i.importo||""); });
+          }
+        }
+        setVals(existing);
+      }catch(e){console.error(e);}
+      setLoading(false);
+    })();
+  },[condId,rate,tok]);
+  const setVal=(rataId,userId,v)=>setVals(p=>({...p,[rataId+":"+userId]:v}));
+  const save=async()=>{
+    setSaving(true);
+    try{
+      for(const r of rate){
+        for(const u of users){
+          const key=r.id+":"+u.id;
+          const imp=parseFloat((vals[key]||"").replace(",","."));
+          if(!isNaN(imp)&&imp>0) await UPS("rate_condomino",{rata_id:r.id,user_id:u.id,importo:imp,notificato:false},tok);
+        }
+      }
+      alert("Importi salvati correttamente!");
+      onClose();
+    }catch(e){alert(e.message);}
+    setSaving(false);
+  };
+  return (
+    <Modal title="Gestione importi — tutte le rate" onClose={onClose}>
+      {loading?<Spinner/>:(
+        <>
+          <p className="text-xs text-gray-400 mb-3">Inserisci o modifica gli importi per ogni condomino e ogni rata. Lascia vuoto per non modificare.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b-2 border-gray-200">
+                  <th className="text-left py-2 pr-4 text-gray-600 font-semibold min-w-32">Condomino</th>
+                  {rate.map(r=><th key={r.id} className="text-center py-2 px-2 text-gray-600 font-semibold whitespace-nowrap">Rata {r.numero_rata}<br/><span className="font-normal text-xs text-gray-400">{new Date(r.data_scadenza).toLocaleDateString("it-IT")}</span></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u=>(
+                  <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-2 pr-4 text-gray-800 text-sm font-medium whitespace-nowrap">Int.{u.interno} {u.name}</td>
+                    {rate.map(r=>(
+                      <td key={r.id} className="py-1 px-1 text-center">
+                        <input type="text" value={vals[r.id+":"+u.id]||""} onChange={e=>setVal(r.id,u.id,e.target.value)}
+                          className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-center text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" placeholder="€"/>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+            <Btn onClick={save} disabled={saving}>{saving?"Salvataggio...":"Salva tutti gli importi"}</Btn>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function ImportImportiModal({rata,condId,tok,onClose}) {
   const [rows,setRows]=useState([]); const [preview,setPreview]=useState(false);
   const [importing,setImporting]=useState(false); const [err,setErr]=useState("");
@@ -814,7 +1086,7 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
 function AdminRate({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(""); const [rate,setRate]=useState([]); const [loading,setLoading]=useState(false);
-  const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false);
+  const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false); const [bulkModal,setBulkModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
   useEffect(()=>{ loadRate(); },[selCond,tok]);
   const loadRate=async()=>{ if(!selCond) return; setLoading(true); try{setRate(await GET("rate_condominio",`cond_id=eq.${selCond}&select=*&order=numero_rata`,tok)||[]);}catch(e){} setLoading(false); };
@@ -822,7 +1094,7 @@ function AdminRate({tok}) {
   const delRata=async id=>{ if(!window.confirm("Eliminare questa rata e tutti gli importi associati?")) return; try{await DEL("rate_condominio",`id=eq.${id}`,tok); loadRate();}catch(e){alert(e.message);} };
   const sendReminders=async()=>{
     setSending(true);
-    try{ const r=await fetch("/.netlify/functions/check-reminders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}); const d=await r.json(); alert(d.sent>0?`✅ Inviati ${d.sent} promemoria.`:"ℹ️ Nessun promemoria da inviare (nessuna rata in scadenza nei prossimi 5 giorni)."); }
+    try{ const r=await fetch("/.netlify/functions/check-reminders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}); const d=await r.json(); alert(d.inviati>0?`✅ Inviati ${d.inviati} promemoria.`:"ℹ️ Nessun promemoria da inviare (nessuna rata in scadenza nei prossimi 5 giorni)."); }
     catch(e){alert("Errore: "+e.message);}
     setSending(false);
   };
@@ -832,6 +1104,8 @@ function AdminRate({tok}) {
         <div><h2 className="text-2xl font-black text-gray-800">Gestione Rate</h2><p className="text-gray-400 text-sm">Configura scadenze e importi (max 5 rate per condominio).</p></div>
         <div className="flex gap-2">
           <Btn variant="warning" onClick={sendReminders} disabled={sending}>{sending?"Invio...":"📧 Invia promemoria"}</Btn>
+          {rate.length>0&&<Btn variant="secondary" onClick={()=>setBulkModal(true)}>📊 Gestisci importi</Btn>}
+          {rate.length>0&&<Btn variant="secondary" onClick={()=>setBulkModal(true)}>📊 Gestisci importi</Btn>}
           {rate.length<5&&<Btn onClick={()=>setModal({mode:"add",data:{numero_rata:rate.length+1,data_scadenza:"",descrizione:""}})}>+ Rata</Btn>}
         </div>
       </div>
@@ -853,6 +1127,8 @@ function AdminRate({tok}) {
       </div>
       {modal&&<RataModal mode={modal.mode} data={modal.data} onSave={saveRata} onClose={()=>setModal(null)}/>}
       {importModal&&<ImportImportiModal rata={importModal} condId={selCond} tok={tok} onClose={()=>setImportModal(null)}/>}
+      {bulkModal&&<BulkImportiModal condId={selCond} rate={rate} tok={tok} onClose={()=>setBulkModal(false)}/>}
+      {bulkModal&&<BulkImportiModal condId={selCond} rate={rate} tok={tok} onClose={()=>setBulkModal(false)}/>}
     </div>
   );
 }
