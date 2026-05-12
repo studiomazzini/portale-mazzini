@@ -1040,7 +1040,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
 
   const parseData=(str)=>{
     // Estrae data da stringhe tipo "entro 17/06/25" o "entro 15/11/2025"
-    const m=str.match(/(d{1,2})[/-](d{1,2})[/-](d{2,4})/);
+    const m=str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
     if(!m) return "";
     let [,g,mm,a]=m;
     if(a.length===2) a="20"+a;
@@ -1048,7 +1048,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
   };
 
   const parseNumeroRata=(str)=>{
-    const m=str.match(/([1-9])s*[°oa°]/i) || str.match(/^([1-9])/);
+    const m=str.match(/([1-9])\s*[\u00B0oa]/i) || str.match(/^([1-9])/);
     return m?Number(m[1]):null;
   };
 
