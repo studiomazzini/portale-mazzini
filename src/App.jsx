@@ -1923,7 +1923,6 @@ function CondominoPanel({user,setUser,onLogout,view,setView}) {
   const condo=user.condominii;
   const isEx = user.stato==="ex_condomino";
   const navBase = isEx
-      [{id:"profilo",label:"Il mio profilo",icon:"👤"},
     ? [{id:"docs",label:"Documenti",icon:"📄"},{id:"account",label:"Il mio account",icon:"⚙️"}]
     : [
         {id:"docs",         label:"Documenti",     icon:"📄"},
