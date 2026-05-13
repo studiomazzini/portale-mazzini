@@ -2106,7 +2106,7 @@ function CondRate({user}) {
 
         // 2. Tutti i profili dell'utente nello stesso stabile
         const sameProfiles=user.allProfiles
-          ? user.allProfiles.filter(p=>p.cond_id===user.cond_id)
+          ? user.allProfiles.filter(p=>String(p.cond_id)===String(user.cond_id))
           : [{id:user.id, interno:user.interno, name:user.name}];
         const userIds=sameProfiles.map(p=>p.id).join(",");
 
