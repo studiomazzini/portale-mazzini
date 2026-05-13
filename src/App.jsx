@@ -1918,11 +1918,12 @@ function CondAccount({user,onLogout}) {
 }
 
 // ── Condomino ─────────────────────────────────────────────────────────────────
-function CondominoPanel({user,onLogout,view,setView}) {
+function CondominoPanel({user,setUser,onLogout,view,setView}) {
   const {data:contattiArr}=useData(()=>GET("contatti","id=eq.1",user.token),[user.token]);
   const condo=user.condominii;
   const isEx = user.stato==="ex_condomino";
   const navBase = isEx
+      [{id:"profilo",label:"Il mio profilo",icon:"👤"},
     ? [{id:"docs",label:"Documenti",icon:"📄"},{id:"account",label:"Il mio account",icon:"⚙️"}]
     : [
         {id:"docs",         label:"Documenti",     icon:"📄"},
@@ -1931,6 +1932,7 @@ function CondominoPanel({user,onLogout,view,setView}) {
         {id:"rate",         label:"Le mie rate",    icon:"💶"},
         {id:"cat",          label:"Dati Catastali", icon:"📊"},
         {id:"segnalazioni", label:"Segnalazioni",   icon:"🚨"},
+        {id:"profilo",      label:"Il mio profilo",  icon:"👤"},
         {id:"account",      label:"Il mio account", icon:"⚙️"},
       ];
   return (
@@ -1955,6 +1957,7 @@ function CondominoPanel({user,onLogout,view,setView}) {
             {view==="rate"         && !isEx && <CondRate user={user}/>}
             {view==="cat"          && !isEx && <CondCatastali user={user}/>}
             {view==="segnalazioni" && !isEx && <CondSegnalazioni user={user}/>}
+            {view==="profilo"      && <CondProfilo user={user} setUser={setUser}/>}
             {view==="account"      && <CondAccount user={user} onLogout={onLogout}/>}
           </div>
         </div>
@@ -2353,7 +2356,7 @@ export default function App() {
       {!user && <Login onLogin={handleLogin}/>}
       {user && user.role!=="admin" && user.primo_accesso && <CambioPassword user={user} onComplete={handlePasswordChanged}/>}
       {user && user.role==="admin" && <AdminPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>}
-      {user && user.role!=="admin" && !user.primo_accesso && <CondominoPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>}
+      {user && user.role!=="admin" && !user.primo_accesso && <CondominoPanel setUser={setUser} user={user} onLogout={handleLogout} view={view} setView={setView}/>}
       {!cookieOk && <CookieBanner onAccept={acceptCookie}/>}
     </>
   );
