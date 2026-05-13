@@ -341,6 +341,7 @@ function Login({onLogin}) {
       }
       const allIds=new Set(profilesById.map(p=>p.id));
       byAuthId.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
+      console.log("byEmail trovati:",byEmail.length,"email login:",loginEmail);
       byEmail.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
       const allProfiles=profilesById;
       const profiles=allProfiles;
