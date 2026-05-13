@@ -324,7 +324,7 @@ function Sidebar({items,active,onSelect,user,onLogout}) {
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 function Login({onLogin}) {
-  const [email,setEmail]=useState(""); const [pwd,setPwd]=useState(""); const [err,setErr]=useState(""); const [loading,setLoading]=useState(false); const [show,setShow]=useState(false);
+  const [email,setEmail]=useState(""); const [pwd,setPwd]=useState(""); const [err,setErr]=useState(""); const [loading,setLoading]=useState(false); const [show,setShow]=useState(false); const [pendingProfiles,setPendingProfiles]=useState(null);
   const submit=async()=>{
     if(!email||!pwd) return; setLoading(true); setErr("");
     try{
@@ -349,6 +349,10 @@ function Login({onLogin}) {
         await sb("/auth/v1/logout",{method:"POST",token:auth.access_token});
         throw new Error("Il tuo account è stato disattivato. Contatta lo studio per riattivarlo.");
       }
+      if(profiles.length>1&&profiles[0].role!=="admin"){
+        setPendingProfiles({list:profiles,token:auth.access_token});
+        setLoading(false); return;
+      }
       onLogin({token:auth.access_token,...profiles[0],email:auth.user.email});
     }catch(e){setErr(e.message);}
     setLoading(false);
@@ -361,7 +365,7 @@ function Login({onLogin}) {
         <p className="text-sm text-gray-400 text-center mb-6">Hai unità in più stabili. Quale vuoi visualizzare?</p>
         <div className="space-y-2">
           {pendingProfiles.list.map(p=>(
-            <button key={p.id} onClick={()=>{setUser({...p,token:pendingProfiles.token,allProfiles:pendingProfiles.list}); setPendingProfiles(null);}}
+            <button key={p.id} onClick={()=>{onLogin({...p,token:pendingProfiles.token,allProfiles:pendingProfiles.list}); setPendingProfiles(null);}}
               className="w-full text-left border border-gray-200 rounded-xl px-4 py-3 hover:bg-blue-50 hover:border-blue-300 transition-all">
               <p className="font-semibold text-gray-800">{p.condominii?.nome||"Stabile"}</p>
               <p className="text-xs text-gray-400">{p.condominii?.via||p.condominii?.indirizzo||""} {p.condominii?.localita||p.condominii?.citta||""} · Int. {p.interno} — {p.name}</p>
