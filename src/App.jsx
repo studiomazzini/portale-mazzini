@@ -345,6 +345,10 @@ function Login({onLogin}) {
       const allProfiles=profilesById;
       const profiles=allProfiles;
       if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
+      if(profiles[0].role==="inquilino"){
+        onLogin({token:auth.access_token,...profiles[0],email:auth.user.email,isInquilino:true});
+        setLoading(false); return;
+      }
       if(profiles[0].stato==="disattivato"){
         await sb("/auth/v1/logout",{method:"POST",token:auth.access_token});
         throw new Error("Il tuo account è stato disattivato. Contatta lo studio per riattivarlo.");
@@ -700,6 +704,10 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
       {mode==="add"&&<><Inp label="Email (opzionale)" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)} hint="Lascia vuoto se senza email"/><Inp label="Password" value={f.pwd||""} onChange={e=>s("pwd",e.target.value)}/></>}
       {mode==="edit"&&<Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>}
       <Inp label="Email 2" type="email" value={f.email2||""} onChange={e=>s("email2",e.target.value)} hint="Riceve le notifiche insieme alla email principale"/>
+      <Sel label="Ruolo" value={f.role||"condomino"} onChange={e=>s("role",e.target.value)}>
+        <option value="condomino">Condomino</option>
+        <option value="inquilino">Inquilino</option>
+      </Sel>
       <Sel label="Condominio" value={f.cond_id} onChange={e=>s("cond_id",e.target.value)}>
         <option value="">— Seleziona —</option>
         {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
@@ -717,7 +725,7 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
 function AdminUtenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
-  const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
+  const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(()=>localStorage.getItem("adminSelCond")||""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
   const [modal,setModal]=useState(null);
   const load=useCallback(async()=>{
     setLoading(true); setErr("");
@@ -1404,9 +1412,10 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
 
 function AdminRate({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
-  const [selCond,setSelCond]=useState(""); const [rate,setRate]=useState([]); const [loading,setLoading]=useState(false);
+  const [selCond,setSelCond]=useState(()=>localStorage.getItem('adminSelCond')||""); const [rate,setRate]=useState([]); const [loading,setLoading]=useState(false);
   const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false); const [importRateModal,setImportRateModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+  useEffect(()=>{ if(selCond) localStorage.setItem('adminSelCond',selCond); },[selCond]);
   useEffect(()=>{ loadRate(); },[selCond,tok]);
   const loadRate=async()=>{ if(!selCond) return; setLoading(true); try{setRate(await GET("rate_condominio",`cond_id=eq.${selCond}&select=*&order=numero_rata`,tok)||[]);}catch(e){} setLoading(false); };
   const saveRata=async f=>{ try{ modal.mode==="add"?await POST("rate_condominio",{...f,cond_id:Number(selCond)},tok):await PATCH("rate_condominio",`id=eq.${f.id}`,f,tok); setModal(null); loadRate(); }catch(e){alert(e.message);} };
@@ -1455,9 +1464,10 @@ function AdminRate({tok}) {
 // ── Admin Documenti ───────────────────────────────────────────────────────────
 function AdminDocumenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
-  const [tipo,setTipo]=useState("cond"); const [selCond,setSelCond]=useState(""); const [selUid,setSelUid]=useState("");
+  const [tipo,setTipo]=useState("cond"); const [selCond,setSelCond]=useState(()=>localStorage.getItem('adminSelCond')||""); const [selUid,setSelUid]=useState("");
   const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false); const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+  useEffect(()=>{ if(selCond) localStorage.setItem('adminSelCond',selCond); },[selCond]);
   useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=eq.condomino&select=id,name,scala,interno&order=name`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
   useEffect(()=>{loadDocs();},[tipo,selCond,selUid,tok]);
   const loadDocs=async()=>{
@@ -1954,7 +1964,7 @@ function CondominoPanel({user,onLogout,view,setView}) {
   );
 }
 
-function CondDocs({user, soloPersonali=false}) {
+function CondDocs({user, soloPersonali=false, inquilinoMode=false}) {
   const [sezione,setSezione]=useState(soloPersonali?"personal":"cond");
   const [filtro,setFiltro]=useState("");
   const qsCond=filtro
@@ -1984,7 +1994,7 @@ function CondDocs({user, soloPersonali=false}) {
       </div>
       <div className="flex gap-2 mb-5 flex-wrap">
         <button onClick={()=>setFiltro("")} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${filtro===""?"bg-slate-800 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>Tutti</button>
-        {Object.entries(CAT_LABELS).map(([k,v])=>(
+        {Object.entries(CAT_LABELS).filter(([k])=>!inquilinoMode||k!=="convocazione").map(([k,v])=>(
           <button key={k} onClick={()=>setFiltro(filtro===k?"":k)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${filtro===k?"bg-blue-600 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>
             <span>{CAT_ICONS[k]}</span><span>{v}</span>
           </button>
@@ -2030,7 +2040,7 @@ function CondGeneralDocs({user}) {
       <p className="text-gray-400 text-sm mb-5">Documenti dello studio validi per tutti i condomìni.</p>
       <div className="flex gap-2 mb-5 flex-wrap">
         <button onClick={()=>setFiltro("")} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${filtro===""?"bg-slate-800 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>Tutti</button>
-        {Object.entries(CAT_LABELS).map(([k,v])=>(
+        {Object.entries(CAT_LABELS).filter(([k])=>!inquilinoMode||k!=="convocazione").map(([k,v])=>(
           <button key={k} onClick={()=>setFiltro(filtro===k?"":k)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${filtro===k?"bg-blue-600 text-white":"bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"}`}>
             <span>{CAT_ICONS[k]}</span><span>{v}</span>
           </button>
