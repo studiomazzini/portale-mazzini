@@ -914,7 +914,7 @@ function AdminImport({tok}) {
         const res2=await createAuthUser(fakeEmail,r.password);
         uid=res2.id;
         // auth_user_id sara impostato nel POST qui sotto
-        f._authUserId=authUserId;
+        r._authUserId=authUserId;
         }
         await POST("profiles",{
           id:uid, auth_user_id:uid, name:r.nomeCompleto, role:"condomino",
