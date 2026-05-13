@@ -350,13 +350,18 @@ function Login({onLogin}) {
       const auth=await sb("/auth/v1/token?grant_type=password",{method:"POST",body:{email,password:pwd}});
       // Cerca tutti i profili per questo utente (per id E per email)
       const profilesById=await GET("profiles",`id=eq.${auth.user.id}&select=*,condominii(*)`,auth.access_token)||[];
-      let allProfiles=[...profilesById];
+      // Cerca anche profili con auth_user_id = questo utente (profili secondari)
+      const byAuthId=await GET("profiles",`auth_user_id=eq.${auth.user.id}&select=*,condominii(*)`,auth.access_token)||[];
+      // Cerca profili con stessa email reale
       const loginEmail=auth.user.email;
+      let byEmail=[];
       if(loginEmail&&!loginEmail.includes("@noemail.local")){
-        const byEmail=await GET("profiles",`email=eq.${encodeURIComponent(loginEmail)}&role=neq.admin&select=*,condominii(*)`,auth.access_token)||[];
-        const ids=new Set(profilesById.map(p=>p.id));
-        byEmail.forEach(p=>{if(!ids.has(p.id)) allProfiles.push(p);});
+        byEmail=await GET("profiles",`email=eq.${encodeURIComponent(loginEmail)}&role=neq.admin&select=*,condominii(*)`,auth.access_token)||[];
       }
+      const allIds=new Set(profilesById.map(p=>p.id));
+      byAuthId.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
+      byEmail.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
+      const allProfiles=profilesById;
       const profiles=allProfiles;
       if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
       if(profiles[0].stato==="disattivato"){
@@ -745,8 +750,23 @@ function AdminUtenti({tok}) {
   const save=async f=>{
     try{
       if(modal.mode==="add"){
-        const {id:uid,email:realEmail}=await createAuthUser(f.email||null,f.pwd);
-        await POST("profiles",{id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
+        let uid;
+        try{
+          const res=await createAuthUser(f.email||null,f.pwd);
+          uid=res.id;
+        }catch(authErr){
+          // Email già in uso: crea profilo secondario legato all'utente esistente
+          const existing=await GET("profiles",`email=eq.${encodeURIComponent(f.email||"")}&limit=1`,tok);
+          const existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
+          if(!existingAuthId) throw authErr;
+          // Usa un UUID casuale come id del profilo secondario
+          const fakeEmail=f.cognome.toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
+          const res2=await createAuthUser(fakeEmail,f.pwd);
+          uid=res2.id;
+          // Sovrascrivi auth_user_id con quello dell'utente principale
+          await sb(`/rest/v1/profiles`,{method:"PATCH",body:{auth_user_id:existingAuthId},prefer:"return=minimal",token:tok,qs:`id=eq.${uid}`});
+        }
+        await POST("profiles",{id:uid,auth_user_id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
       }else{
         await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:f.email||null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
       }
@@ -886,14 +906,14 @@ function AdminImport({tok}) {
           const res = await createAuthUser(r.email||null, r.password);
           uid = res.id;
         } catch(authErr) {
-          // Email gia in uso: genera email tecnica fittizia per il login
+          // Email gia in uso: collega al profilo esistente tramite auth_user_id
           const base = r.nomeCompleto.toLowerCase().replace(/[^a-z0-9]/g,".");
           const fake = base + "." + Date.now() + "@noemail.local";
           const res2 = await createAuthUser(fake, r.password);
           uid = res2.id;
         }
         await POST("profiles",{
-          id:uid, name:r.nomeCompleto, role:"condomino",
+          id:uid, auth_user_id:uid, name:r.nomeCompleto, role:"condomino",
           cond_id:Number(selCond),
           email:isRealEmail(r.email)?r.email:null,
           email2:isRealEmail(r.email2)?r.email2:null,
