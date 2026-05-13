@@ -343,6 +343,7 @@ function Login({onLogin}) {
       byAuthId.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
       byEmail.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
       const allProfiles=profilesById;
+      console.log("PROFILI TROVATI:",allProfiles.length, allProfiles.map(p=>p.email+"@"+p.cond_id));
       const profiles=allProfiles;
       if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
       if(profiles[0].stato==="disattivato"){
