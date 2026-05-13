@@ -343,6 +343,7 @@ function Login({onLogin}) {
       byAuthId.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
       byEmail.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
       const allProfiles=profilesById;
+      console.log("LOGIN DEBUG - totale profili:",allProfiles.length, allProfiles.map(p=>({id:p.id.substring(0,8),cond:p.cond_id,email:p.email,authid:(p.auth_user_id||"").substring(0,8)})));
       const profiles=allProfiles;
       if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
       if(profiles[0].role==="inquilino"){
