@@ -2270,6 +2270,53 @@ function CondSegnalazioni({user}) {
 }
 
 // ── App Root ──────────────────────────────────────────────────────────────────
+
+// ── Pannello Inquilino ────────────────────────────────────────────────────────
+function InquilinoPanel({user, setUser}) {
+  const [view,setView]=useState("profilo");
+  const nav=[
+    {id:"profilo", label:"Il mio profilo", icon:"👤"},
+    {id:"docs",    label:"Documenti",       icon:"📁"},
+    {id:"generali",label:"Doc. Generali",   icon:"📋"},
+    {id:"rate",    label:"Le mie rate",     icon:"💶"},
+    {id:"account", label:"Account",         icon:"⚙️"},
+  ];
+  return (
+    <div className="flex h-screen bg-gray-50">
+      <div className="w-64 shrink-0 h-full bg-slate-800 flex flex-col">
+        <div className="p-5 border-b border-slate-700">
+          <div className="w-10 h-10 bg-slate-600 rounded-xl flex items-center justify-center text-white font-black text-lg mb-3">{(user.name||"?").charAt(0).toUpperCase()}</div>
+          <p className="text-white font-semibold text-sm truncate">{user.name}</p>
+          <p className="text-slate-400 text-xs truncate">{user.condominii?.nome||"—"}</p>
+          <span className="inline-block mt-1 text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full">Inquilino</span>
+        </div>
+        <nav className="flex-1 p-3 space-y-1 overflow-auto">
+          {nav.map(n=>(
+            <button key={n.id} onClick={()=>setView(n.id)}
+              className={"w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all "+(view===n.id?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
+              <span className="text-base">{n.icon}</span>{n.label}
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-slate-700">
+          <button onClick={()=>setUser(null)} className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 hover:text-white text-sm transition-all">
+            <span>🚪</span>Esci
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 p-8 overflow-auto">
+        <div className="max-w-3xl mx-auto">
+          {view==="profilo"  && <CondProfilo user={user} setUser={setUser}/>}
+          {view==="docs"     && <CondDocs user={user} inquilinoMode={true}/>}
+          {view==="generali" && <CondGeneralDocs user={user} inquilinoMode={true}/>}
+          {view==="rate"     && <CondRate user={user}/>}
+          {view==="account"  && <CondAccount user={user} setUser={setUser}/>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user,setUser]=useState(null); const [view,setView]=useState("docs"); const [checking,setChecking]=useState(true);
   const [cookieOk,setCookieOk]=useState(()=>localStorage.getItem("cookie_consent_v1")==="accepted");
