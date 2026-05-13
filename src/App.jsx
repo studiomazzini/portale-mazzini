@@ -349,7 +349,6 @@ function Login({onLogin}) {
         await sb("/auth/v1/logout",{method:"POST",token:auth.access_token});
         throw new Error("Il tuo account è stato disattivato. Contatta lo studio per riattivarlo.");
       }
-      console.log("CHECK:",profiles.length,profiles.map(p=>p.id+"="+p.email+"="+p.cond_id));
       if(profiles.length>1&&profiles[0].role!=="admin"){
         setPendingProfiles({list:profiles,token:auth.access_token});
         setLoading(false); return;
