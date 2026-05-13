@@ -907,7 +907,7 @@ function AdminImport({tok}) {
           uid = res.id;
         } catch(authErr) {
         // Email gia in uso: crea profilo secondario con auth_user_id del proprietario
-        const existing=await GET("profiles",email=eq.&limit=1,tok);
+        const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&limit=1",tok);
         const authUserId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
         if(!authUserId) throw authErr;
         const fakeEmail=(f.cognome||"user").toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
