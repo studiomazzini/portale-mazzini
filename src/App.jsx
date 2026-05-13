@@ -881,8 +881,16 @@ function AdminImport({tok}) {
           inquilini: []
         };
         if(persona.isProprietario){
-          parsed.push(persona);
-          if(nUn) mapByNUn[nUn]=persona;
+          if(nUn && mapByNUn[nUn]){
+            // Stessa N. Un. → secondo proprietario: metti il nome in "presso"
+            const existing=mapByNUn[nUn];
+            existing.presso=existing.presso
+              ? existing.presso+" / "+persona.nomeCompleto
+              : persona.nomeCompleto;
+          } else {
+            parsed.push(persona);
+            if(nUn) mapByNUn[nUn]=persona;
+          }
         } else if(persona.isInquilino){
           const inqData={nome:nomeCompleto,email:persona.email,tel:persona.telefono,email2:persona.email2};
           const propr=nUn?mapByNUn[nUn]:null;
