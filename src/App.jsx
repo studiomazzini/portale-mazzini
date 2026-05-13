@@ -741,7 +741,8 @@ function AdminUtenti({tok}) {
           uid=res.id;
         }catch(authErr){
           // Email già in uso: crea profilo secondario legato all'utente esistente
-          const existing=await GET("profiles",`email=eq.${encodeURIComponent(f.email||"")}&limit=1`,tok);
+          const svk=import.meta.env.VITE_SUPABASE_SERVICE_KEY||tok;
+          const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&limit=1",svk);
           existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
           if(!existingAuthId) throw authErr;
           // Usa un UUID casuale come id del profilo secondario
