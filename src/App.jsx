@@ -2092,40 +2092,48 @@ function InqModal({mode,data,onSave,onClose}) {
 function CondRate({user}) {
   const SBU = import.meta.env.VITE_SUPABASE_URL;
   const SBK = import.meta.env.VITE_SUPABASE_KEY;
-  const [rate,setRate]=useState([]); const [loading,setLoading]=useState(true);
+  const [righe,setRighe]=useState([]); const [loading,setLoading]=useState(true);
 
   useEffect(()=>{
     (async()=>{
       setLoading(true);
       try{
+        // 1. Carica definizioni rate per questo stabile
         const r1=await fetch(SBU+"/rest/v1/rate_condominio?select=id,numero_rata,data_scadenza,descrizione&cond_id=eq."+user.cond_id+"&order=data_scadenza",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
         const rateDef=await r1.json()||[];
-        if(!rateDef.length){setRate([]); setLoading(false); return;}
+        if(!rateDef.length){setRighe([]); setLoading(false); return;}
+
+        // 2. Tutti i profili dell'utente nello stesso stabile
+        const sameProfiles=user.allProfiles
+          ? user.allProfiles.filter(p=>p.cond_id===user.cond_id)
+          : [{id:user.id, interno:user.interno, name:user.name}];
+        const userIds=sameProfiles.map(p=>p.id).join(",");
+
+        // 3. Carica importi per tutte le unità
         const ids=rateDef.map(r=>r.id).join(",");
-        // Carica importi per TUTTE le unità dell'utente nello stesso stabile
-        const sameCondProfiles=user.allProfiles?user.allProfiles.filter(p=>p.cond_id===user.cond_id):[{id:user.id}];
-        const userIds=sameCondProfiles.map(p=>p.id).join(",");
-        console.log("SAME COND PROFILES:",sameCondProfiles.length, sameCondProfiles.map(p=>p.id+"@"+p.interno), "userIds:", userIds);
         const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,rata_id,user_id&rata_id=in.("+ids+")&user_id=in.("+userIds+")",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
         const importi=await r2.json()||[];
-        // Raggruppa importi per rata, somma se più unità
-        const impMap={};
-        if(Array.isArray(importi)){
-          importi.forEach(i=>{
-            if(!impMap[i.rata_id]) impMap[i.rata_id]={importo:0,notificato:true,unita:[]};
-            impMap[i.rata_id].importo+=Number(i.importo)||0;
-            impMap[i.rata_id].notificato=impMap[i.rata_id].notificato&&i.notificato;
-            const prof=sameCondProfiles.find(p=>p.id===i.user_id);
-            if(prof&&prof.interno) impMap[i.rata_id].unita.push(prof.interno);
-          });
+
+        // 4. Costruisci lista: una riga per ogni coppia (unità, rata)
+        const result=[];
+        for(const prof of sameProfiles){
+          for(const rata of rateDef){
+            const imp=Array.isArray(importi)?importi.find(i=>i.rata_id===rata.id&&i.user_id===prof.id):null;
+            result.push({
+              rata_id:rata.id,
+              numero_rata:rata.numero_rata,
+              data_scadenza:rata.data_scadenza,
+              descrizione:rata.descrizione,
+              interno:prof.interno||"—",
+              name:prof.name||user.name,
+              importo:imp?.importo||null,
+              notificato:imp?.notificato||false,
+            });
+          }
         }
-        setRate(rateDef.map(r=>({...r,
-          importo:impMap[r.id]?.importo||null,
-          notificato:impMap[r.id]?.notificato||false,
-          unita:impMap[r.id]?.unita||[]
-        })));
+        setRighe(result);
       }catch(e){console.error(e);}
       setLoading(false);
     })();
@@ -2135,20 +2143,28 @@ function CondRate({user}) {
   const diffGiorni=d=>Math.ceil((new Date(d)-oggi)/(1000*60*60*24));
   const isScaduta=d=>diffGiorni(d)<0;
   const isInScadenza=d=>{const g=diffGiorni(d); return g>=0&&g<=15;};
+  const multiUnita=user.allProfiles&&user.allProfiles.filter(p=>p.cond_id===user.cond_id).length>1;
+
+  // Raggruppa per rata se multi-unità
+  const rate=multiUnita
+    ? [...new Map(righe.map(r=>[r.rata_id,r])).values()]
+    : righe;
 
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-2">Le mie rate</h2>
       <p className="text-gray-400 text-sm mb-5">Piano rate del tuo condominio con gli importi a tuo carico.</p>
-      {loading?<Spinner/>:!rate.length?<div className="bg-white rounded-2xl border border-gray-100 shadow-sm"><EmptyState icon="📅" text="Nessuna rata configurata per il tuo condominio."/></div>
+      {loading?<Spinner/>:!righe.length?<div className="bg-white rounded-2xl border border-gray-100 shadow-sm"><EmptyState icon="📅" text="Nessuna rata configurata per il tuo condominio."/></div>
       :(
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          {rate.map((r,i)=>{
+          {(multiUnita?rate:righe).map((r,i,arr)=>{
             const scaduta=isScaduta(r.data_scadenza);
             const inScadenza=isInScadenza(r.data_scadenza);
             const g=diffGiorni(r.data_scadenza);
+            // Importi per questa rata (tutte le unità se multi)
+            const impPerRata=multiUnita?righe.filter(x=>x.rata_id===r.rata_id):null;
             return (
-              <div key={r.id} className={"p-5 "+(i<rate.length-1?"border-b border-gray-50":"")}>
+              <div key={r.rata_id+r.interno} className={"p-5 "+(i<arr.length-1?"border-b border-gray-50":"")}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className={"w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg "+(scaduta?"bg-red-100 text-red-600":inScadenza?"bg-amber-100 text-amber-600":"bg-blue-50 text-blue-600")}>
@@ -2161,15 +2177,26 @@ function CondRate({user}) {
                       {inScadenza&&!scaduta&&<span className="text-xs text-amber-500 font-semibold">{g===0?"Scade oggi":g===1?"Scade domani":"Scade tra "+g+" giorni"}</span>}
                     </div>
                   </div>
-                  <div className="text-right">
-                    {r.importo!=null
-                      ?<><p className="text-xl font-black text-gray-800">EUR {Number(r.importo).toFixed(2)}</p>
-                      {r.unita?.length>1&&<p className="text-xs text-gray-400">Int. {r.unita.join(", ")}</p>}</>
-                      :<p className="text-sm text-gray-400 italic">Importo non ancora definito</p>
-                    }
-                    {r.notificato&&<p className="text-xs text-emerald-600 font-semibold mt-0.5">✓ Promemoria inviato</p>}
-                  </div>
+                  {!multiUnita&&(
+                    <div className="text-right">
+                      {r.importo!=null?<p className="text-xl font-black text-gray-800">EUR {Number(r.importo).toFixed(2)}</p>:<p className="text-sm text-gray-400 italic">Da definire</p>}
+                      {r.notificato&&<p className="text-xs text-emerald-600 font-semibold mt-0.5">✓ Promemoria inviato</p>}
+                    </div>
+                  )}
                 </div>
+                {multiUnita&&impPerRata&&(
+                  <div className="mt-3 ml-14 space-y-1">
+                    {impPerRata.map((imp,j)=>(
+                      <div key={j} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2">
+                        <span className="text-sm text-gray-600">Int. {imp.interno}</span>
+                        <div className="text-right">
+                          {imp.importo!=null?<span className="font-bold text-gray-800">EUR {Number(imp.importo).toFixed(2)}</span>:<span className="text-xs text-gray-400 italic">Da definire</span>}
+                          {imp.notificato&&<span className="text-xs text-emerald-600 ml-2">✓</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
