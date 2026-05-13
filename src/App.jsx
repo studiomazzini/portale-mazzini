@@ -2104,6 +2104,7 @@ function CondRate({user}) {
         const ids=rateDef.map(r=>r.id).join(",");
         // Carica importi per TUTTE le unità dell'utente nello stesso stabile
         const sameCondProfiles=user.allProfiles?user.allProfiles.filter(p=>p.cond_id===user.cond_id):[{id:user.id}];
+        console.log("SAME COND PROFILES:",sameCondProfiles.length, sameCondProfiles.map(p=>p.id+"@"+p.interno), "userIds:", userIds);
         const userIds=sameCondProfiles.map(p=>p.id).join(",");
         const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,rata_id,user_id&rata_id=in.("+ids+")&user_id=in.("+userIds+")",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
