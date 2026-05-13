@@ -764,7 +764,6 @@ function AdminUtenti({tok}) {
           const res2=await createAuthUser(fakeEmail,f.pwd);
           uid=res2.id;
           // Sovrascrivi auth_user_id con quello dell'utente principale
-          await sb(`/rest/v1/profiles`,{method:"PATCH",body:{auth_user_id:existingAuthId},prefer:"return=minimal",token:tok,qs:`id=eq.${uid}`});
         }
         await POST("profiles",{id:uid,auth_user_id:uid,name:f.name,role:"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
       }else{
