@@ -354,10 +354,18 @@ function Login({onLogin}) {
         throw new Error("Il tuo account è stato disattivato. Contatta lo studio per riattivarlo.");
       }
       if(profiles.length>1&&profiles[0].role!=="admin"){
-        setPendingProfiles({list:profiles,token:auth.access_token});
-        setLoading(false); return;
+        // Controlla se tutti i profili sono nello stesso stabile
+        const condIds=new Set(profiles.map(p=>p.cond_id).filter(Boolean));
+        if(condIds.size>1){
+          // Stabili diversi → mostra selettore
+          setPendingProfiles({list:profiles,token:auth.access_token});
+          setLoading(false); return;
+        }
+        // Stesso stabile → entra con il profilo principale, passa tutti i profili
+        // Il primo profilo è quello con id=auth.user.id (profilo principale)
       }
-      onLogin({token:auth.access_token,...profiles[0],email:auth.user.email});
+      onLogin({token:auth.access_token,...profiles[0],email:auth.user.email,
+        allProfiles:profiles.length>1?profiles:undefined});
     }catch(e){setErr(e.message);}
     setLoading(false);
   };
@@ -2094,12 +2102,28 @@ function CondRate({user}) {
         const rateDef=await r1.json()||[];
         if(!rateDef.length){setRate([]); setLoading(false); return;}
         const ids=rateDef.map(r=>r.id).join(",");
-        const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,rata_id&rata_id=in.("+ids+")&user_id=eq."+user.id,
+        // Carica importi per TUTTE le unità dell'utente nello stesso stabile
+        const sameCondProfiles=user.allProfiles?user.allProfiles.filter(p=>p.cond_id===user.cond_id):[{id:user.id}];
+        const userIds=sameCondProfiles.map(p=>p.id).join(",");
+        const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,rata_id,user_id&rata_id=in.("+ids+")&user_id=in.("+userIds+")",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
         const importi=await r2.json()||[];
+        // Raggruppa importi per rata, somma se più unità
         const impMap={};
-        if(Array.isArray(importi)) importi.forEach(i=>{impMap[i.rata_id]=i;});
-        setRate(rateDef.map(r=>({...r,importo:impMap[r.id]?.importo||null,notificato:impMap[r.id]?.notificato||false})));
+        if(Array.isArray(importi)){
+          importi.forEach(i=>{
+            if(!impMap[i.rata_id]) impMap[i.rata_id]={importo:0,notificato:true,unita:[]};
+            impMap[i.rata_id].importo+=Number(i.importo)||0;
+            impMap[i.rata_id].notificato=impMap[i.rata_id].notificato&&i.notificato;
+            const prof=sameCondProfiles.find(p=>p.id===i.user_id);
+            if(prof&&prof.interno) impMap[i.rata_id].unita.push(prof.interno);
+          });
+        }
+        setRate(rateDef.map(r=>({...r,
+          importo:impMap[r.id]?.importo||null,
+          notificato:impMap[r.id]?.notificato||false,
+          unita:impMap[r.id]?.unita||[]
+        })));
       }catch(e){console.error(e);}
       setLoading(false);
     })();
@@ -2137,7 +2161,8 @@ function CondRate({user}) {
                   </div>
                   <div className="text-right">
                     {r.importo!=null
-                      ?<p className="text-xl font-black text-gray-800">EUR {Number(r.importo).toFixed(2)}</p>
+                      ?<><p className="text-xl font-black text-gray-800">EUR {Number(r.importo).toFixed(2)}</p>
+                      {r.unita?.length>1&&<p className="text-xs text-gray-400">Int. {r.unita.join(", ")}</p>}</>
                       :<p className="text-sm text-gray-400 italic">Importo non ancora definito</p>
                     }
                     {r.notificato&&<p className="text-xs text-emerald-600 font-semibold mt-0.5">✓ Promemoria inviato</p>}
