@@ -735,14 +735,14 @@ function AdminUtenti({tok}) {
   const save=async f=>{
     try{
       if(modal.mode==="add"){
-        let uid;
+        let uid; let existingAuthId=null;
         try{
           const res=await createAuthUser(f.email||null,f.pwd);
           uid=res.id;
         }catch(authErr){
           // Email già in uso: crea profilo secondario legato all'utente esistente
           const existing=await GET("profiles",`email=eq.${encodeURIComponent(f.email||"")}&limit=1`,tok);
-          const existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
+          existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
           if(!existingAuthId) throw authErr;
           // Usa un UUID casuale come id del profilo secondario
           const fakeEmail=f.cognome.toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
