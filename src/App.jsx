@@ -907,14 +907,15 @@ function AdminImport({tok}) {
           uid = res.id;
         } catch(authErr) {
         // Email gia in uso: crea profilo secondario con auth_user_id del proprietario
-        const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&limit=1",tok);
+        const existing=await GET("profiles","email=eq."+encodeURIComponent(r.email||"")+"&limit=1",tok);
         const authUserId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
         if(!authUserId) throw authErr;
-        const fakeEmail=(f.cognome||"user").toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
-        const res2=await createAuthUser(fakeEmail,f.pwd);
+        const fakeEmail=(r.cognome||r.nomeCompleto||"user").toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
+        const res2=await createAuthUser(fakeEmail,r.password);
         uid=res2.id;
         // auth_user_id sara impostato nel POST qui sotto
         f._authUserId=authUserId;
+        }
         await POST("profiles",{
           id:uid, auth_user_id:uid, name:r.nomeCompleto, role:"condomino",
           cond_id:Number(selCond),
