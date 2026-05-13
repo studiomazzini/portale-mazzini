@@ -2022,7 +2022,7 @@ function CondDocs({user, soloPersonali=false, inquilinoMode=false}) {
   );
 }
 
-function CondGeneralDocs({user}) {
+function CondGeneralDocs({user, inquilinoMode=false}) {
   const [filtro,setFiltro]=useState("");
   const qs=filtro
     ? `cond_id=eq.${user.cond_id}&cat=eq.${filtro}&select=*&order=uploaded_at.desc`
