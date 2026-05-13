@@ -210,25 +210,6 @@ function CambioPassword({user, onComplete}) {
     setLoading(false);
   };
 
-  if(pendingProfiles) return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-        <div className="w-14 h-14 bg-slate-800 rounded-2xl flex items-center justify-center text-2xl mb-4 mx-auto">🏢</div>
-        <h2 className="text-xl font-black text-gray-800 text-center mb-1">Seleziona lo stabile</h2>
-        <p className="text-sm text-gray-400 text-center mb-6">Hai unità in più stabili. Quale vuoi visualizzare?</p>
-        <div className="space-y-2">
-          {pendingProfiles.list.map(p=>(
-            <button key={p.id} onClick={()=>{setUser({...p,token:pendingProfiles.token,allProfiles:pendingProfiles.list}); setPendingProfiles(null);}}
-              className="w-full text-left border border-gray-200 rounded-xl px-4 py-3 hover:bg-blue-50 hover:border-blue-300 transition-all">
-              <p className="font-semibold text-gray-800">{p.condominii?.nome||"Stabile"}</p>
-              <p className="text-xs text-gray-400">{p.condominii?.via||p.condominii?.indirizzo||""} {p.condominii?.localita||p.condominii?.citta||""} · Int. {p.interno} — {p.name}</p>
-            </button>
-          ))}
-        </div>
-        <button onClick={()=>setPendingProfiles(null)} className="mt-4 w-full text-sm text-gray-400 hover:text-gray-600 transition">← Torna al login</button>
-      </div>
-    </div>
-  );
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-800 to-blue-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
