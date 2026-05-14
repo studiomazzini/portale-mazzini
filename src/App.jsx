@@ -360,7 +360,9 @@ function Login({onLogin}) {
       // Controlla avvisi temporanei
       try{
         const condIds=[...new Set(profiles.map(p=>p.cond_id).filter(Boolean))].join(",");
-        const av=await GET("avvisi","tipo=eq.temporaneo&cond_id=in.("+condIds+")&select=id&limit=1",auth.access_token);
+        const isInq=profiles[0]?.role==="inquilino";
+        const avFilter="tipo=eq.temporaneo&cond_id=in.("+condIds+")&select=id"+(isInq?"&solo_proprietari=eq.false":"")+"&limit=1";
+        const av=await GET("avvisi",avFilter,auth.access_token);
         if(av?.length>0){
           const u={token:auth.access_token,...profiles[0],email:auth.user.email,allProfiles:profiles.length>1?profiles:undefined};
           onLogin({...u,_startView:"avvisi"});
@@ -1764,6 +1766,7 @@ function AdminAvvisi({tok}) {
           <div key={a.id} className={"flex items-center justify-between p-4 "+(i<avvisi.length-1?"border-b border-gray-50":"")+(isScaduto(a)?" bg-gray-50 opacity-60":"")}>
             <div className="flex items-center gap-3">
               <span className={"text-xs px-2 py-0.5 rounded-full font-semibold "+(a.tipo==="temporaneo"?"bg-amber-100 text-amber-700":"bg-blue-100 text-blue-700")}>{a.tipo==="temporaneo"?"⏱ Temporaneo":"📌 Generale"}</span>
+              {a.solo_proprietari&&<span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-orange-100 text-orange-700">👥 Solo condomini</span>}
               <div>
                 <p className="font-medium text-gray-800 text-sm">{a.titolo}</p>
                 <p className="text-xs text-gray-400">{new Date(a.created_at).toLocaleDateString("it-IT")}{a.tipo==="temporaneo"?(" · "+( isScaduto(a)?"Scaduto":"Scade tra "+giorniRimasti(a)+" gg")):""}</p>
@@ -1782,6 +1785,7 @@ function AvvisoModal({condominii,selCond,tok,onClose}) {
   const SBU=import.meta.env.VITE_SUPABASE_URL;
   const [titolo,setTitolo]=useState(""); const [tipo,setTipo]=useState("temporaneo");
   const [cond,setCond]=useState(selCond); const [file,setFile]=useState(null);
+  const [soloProprietari,setSoloProprietari]=useState(false);
   const [saving,setSaving]=useState(false);
 
   const salva=async()=>{
@@ -1791,7 +1795,7 @@ function AvvisoModal({condominii,selCond,tok,onClose}) {
       const ext=file.name.split(".").pop();
       const storagePath="avvisi/"+cond+"/"+Date.now()+"."+ext;
       await uploadFile("avvisi",storagePath,file,tok);
-      await POST("avvisi",{titolo,tipo,cond_id:Number(cond),storage_path:storagePath,nome_file:file.name},tok);
+      await POST("avvisi",{titolo,tipo,solo_proprietari:soloProprietari,cond_id:Number(cond),storage_path:storagePath,nome_file:file.name},tok);
       onClose();
     }catch(e){alert(e.message);}
     setSaving(false);
@@ -1812,6 +1816,10 @@ function AvvisoModal({condominii,selCond,tok,onClose}) {
             {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
           </Sel>
         </div>
+      </div>
+      <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+        <input type="checkbox" id="soloprop" checked={soloProprietari} onChange={e=>setSoloProprietari(e.target.checked)} className="w-4 h-4 accent-amber-600"/>
+        <label htmlFor="soloprop" className="text-sm text-amber-800 font-medium cursor-pointer">Visibile solo ai Condomini (escludi Inquilini)</label>
       </div>
       <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">File PDF *</label>
       <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
@@ -2369,12 +2377,16 @@ function CondAvvisi({user}) {
         const res=await fetch(SBU+"/rest/v1/avvisi?cond_id=in.("+allCondIds+")&order=created_at.desc&select=*,condominii(nome)",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
         const all=await res.json()||[];
-        // Filtra temporanei scaduti lato client
+        const isInquilino=user.role==="inquilino"||user.isInquilino;
+        // Filtra temporanei scaduti e avvisi solo-proprietari per inquilini
         const attivi=all.filter(a=>{
-          if(a.tipo==="generale") return true;
-          const scad=new Date(a.created_at);
-          scad.setDate(scad.getDate()+15);
-          return scad>new Date();
+          if(a.solo_proprietari&&isInquilino) return false;
+          if(a.tipo==="temporaneo"){
+            const scad=new Date(a.created_at);
+            scad.setDate(scad.getDate()+15);
+            return scad>new Date();
+          }
+          return true;
         });
         setAvvisi(attivi);
       }catch(e){console.error(e);}
