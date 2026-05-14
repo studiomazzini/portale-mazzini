@@ -757,7 +757,7 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
 }
 
 function AdminUtenti({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
   const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(()=>localStorage.getItem("adminSelCond")||""); const [filtroRuolo,setFiltroRuolo]=useState(""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
   const [modal,setModal]=useState(null);
@@ -857,7 +857,7 @@ function AdminUtenti({tok}) {
 
 // ── Admin Importa Excel ───────────────────────────────────────────────────────
 function AdminImport({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(""); const [rows,setRows]=useState([]);
   const [preview,setPreview]=useState(false); const [importing,setImporting]=useState(false);
   const [progress,setProgress]=useState(0); const [results,setResults]=useState(null); const [err,setErr]=useState("");
@@ -1055,7 +1055,7 @@ function AdminImport({tok}) {
 
 // ── Admin Inquilini ───────────────────────────────────────────────────────────
 function AdminInquilini({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(""); const [inqList,setInqList]=useState([]); const [loading,setLoading]=useState(false);
   const [modal,setModal]=useState(null); const [docModal,setDocModal]=useState(null);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
@@ -1454,7 +1454,7 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
 }
 
 function AdminRate({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(()=>localStorage.getItem('adminSelCond')||""); const [rate,setRate]=useState([]); const [loading,setLoading]=useState(false);
   const [modal,setModal]=useState(null); const [importModal,setImportModal]=useState(null); const [sending,setSending]=useState(false); const [bulkModal,setBulkModal]=useState(false); const [importRateModal,setImportRateModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
@@ -1506,7 +1506,7 @@ function AdminRate({tok}) {
 
 // ── Admin Documenti ───────────────────────────────────────────────────────────
 function AdminDocumenti({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [tipo,setTipo]=useState("cond"); const [selCond,setSelCond]=useState(()=>localStorage.getItem('adminSelCond')||""); const [selUid,setSelUid]=useState("");
   const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false); const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
@@ -1570,7 +1570,7 @@ function AdminDocumenti({tok}) {
 
 // ── Admin Documenti Generali ──────────────────────────────────────────────────
 function AdminGeneralDocs({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState("");
   const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
@@ -1725,7 +1725,7 @@ function AdminScadenze({tok}) {
 
 // ── Admin Avvisi ──────────────────────────────────────────────────────────────
 function AdminAvvisi({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [selCond,setSelCond]=useState(()=>localStorage.getItem('adminSelCond')||"");
   const [avvisi,setAvvisi]=useState([]); const [loading,setLoading]=useState(false);
   const [modal,setModal]=useState(false);
@@ -2083,6 +2083,7 @@ function CondominoPanel({user,setUser,onLogout,view,setView}) {
         {id:"generali",     label:"Doc. Generali", icon:"📋"},
         {id:"inq",          label:"Inquilini",      icon:"🏠"},
         {id:"rate",         label:"Le mie rate",    icon:"💶"},
+        {id:"banca",        label:"Dati Bancari",   icon:"🏦"},
         {id:"cat",          label:"Dati Catastali", icon:"📊"},
         {id:"segnalazioni", label:"Segnalazioni",   icon:"🚨"},
         {id:"profilo",      label:"Il mio profilo",  icon:"👤"},
@@ -2109,6 +2110,7 @@ function CondominoPanel({user,setUser,onLogout,view,setView}) {
             {view==="generali"     && !isEx && <CondGeneralDocs user={user}/>}
             {view==="inq"          && !isEx && <CondInquilini user={user}/>}
             {view==="rate"         && !isEx && <CondRate user={user}/>}
+            {view==="banca"        && !isEx && <CondBanca user={user}/>}
             {view==="cat"          && !isEx && <CondCatastali user={user}/>}
             {view==="segnalazioni" && !isEx && <CondSegnalazioni user={user}/>}
             {view==="profilo"      && <CondProfilo user={user} setUser={setUser}/>}
@@ -2239,6 +2241,64 @@ function InqModal({mode,data,onSave,onClose}) {
       <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
       <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={onClose}>Annulla</Btn><Btn onClick={()=>f.nome&&onSave(f)}>Salva</Btn></div>
     </Modal>
+  );
+}
+
+function CondBanca({user}) {
+  const condo = user.condominii;
+  const [copiato, setCopiato] = React.useState(false);
+
+  const copiaIban = () => {
+    if (!condo?.iban) return;
+    navigator.clipboard.writeText(condo.iban).then(() => {
+      setCopiato(true);
+      setTimeout(() => setCopiato(false), 2000);
+    });
+  };
+
+  const formattaIban = iban => {
+    if (!iban) return "—";
+    return iban.replace(/(.{4})/g, "$1 ").trim();
+  };
+
+  return (
+    <div>
+      <h2 className="text-2xl font-black text-gray-800 mb-2">Dati Bancari</h2>
+      <p className="text-gray-400 text-sm mb-6">Coordinate bancarie del condominio per i pagamenti delle rate.</p>
+      {!condo?.iban && !condo?.istituto ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+          <EmptyState icon="🏦" text="Nessun dato bancario disponibile. Contatta lo studio."/>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-50">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Intestazione conto</p>
+            <p className="text-lg font-bold text-gray-800">{condo?.intestazione || condo?.nome || "—"}</p>
+          </div>
+          <div className="p-6 border-b border-gray-50">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Istituto bancario</p>
+            <p className="text-lg font-semibold text-gray-800">{condo?.istituto || "—"}</p>
+          </div>
+          <div className="p-6">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">IBAN</p>
+            <div className="flex items-center gap-3">
+              <p className="text-xl font-mono font-bold text-gray-800 tracking-wider">{formattaIban(condo?.iban)}</p>
+              {condo?.iban && (
+                <button onClick={copiaIban}
+                  className={"flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all "+(copiato?"bg-emerald-100 text-emerald-700":"bg-gray-100 text-gray-600 hover:bg-gray-200")}>
+                  {copiato ? "✓ Copiato" : "📋 Copia"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="mt-4 bg-amber-50 border border-amber-100 rounded-2xl px-5 py-4">
+        <p className="text-sm text-amber-800">
+          <strong>⚠️ Importante:</strong> Usare queste coordinate bancarie esclusivamente per il pagamento delle rate condominiali. Per qualsiasi dubbio contattare lo studio amministrativo.
+        </p>
+      </div>
+    </div>
   );
 }
 
