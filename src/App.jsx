@@ -2246,7 +2246,7 @@ function InqModal({mode,data,onSave,onClose}) {
 
 function CondBanca({user}) {
   const condo = user.condominii;
-  const [copiato, setCopiato] = React.useState(false);
+  const [copiato,setCopiato]=useState(false);
 
   const copiaIban = () => {
     if (!condo?.iban) return;
