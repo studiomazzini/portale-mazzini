@@ -296,9 +296,21 @@ function ContactFooter({c}) {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({items,active,onSelect,user,onLogout}) {
+function Sidebar({items,active,onSelect,user,onLogout,setUser}) {
   return (
     <div className="w-60 bg-slate-900 min-h-screen flex flex-col flex-shrink-0">
+      {user?.allProfiles&&new Set(user.allProfiles.map(p=>String(p.cond_id)).filter(Boolean)).size>1&&(
+        <div className="px-3 pt-3 pb-1">
+          <p className="text-xs text-slate-500 uppercase tracking-wide mb-1 px-1">Stabile</p>
+          <select value={user.id}
+            onChange={e=>{const p=user.allProfiles.find(x=>x.id===e.target.value); if(p&&setUser) setUser({...p,token:user.token,allProfiles:user.allProfiles});}}
+            className="w-full bg-slate-700 text-white text-xs rounded-lg px-2 py-1.5 border border-slate-600 focus:outline-none">
+            {[...new Map(user.allProfiles.filter(p=>p.cond_id).map(p=>[p.cond_id,p])).values()].map(p=>(
+              <option key={p.id} value={p.id}>{p.condominii?.nome||"Stabile"}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="px-5 py-6 border-b border-slate-700">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-blue-500 rounded-xl flex items-center justify-center text-white font-bold">M</div>
@@ -346,6 +358,16 @@ function Login({onLogin}) {
       console.log("LOGIN DEBUG - totale profili:",allProfiles.length, allProfiles.map(p=>({id:p.id.substring(0,8),cond:p.cond_id,email:p.email,authid:(p.auth_user_id||"").substring(0,8)})));
       const profiles=allProfiles;
       if(!profiles?.length) throw new Error("Profilo non trovato. Contatta l'amministratore.");
+      // Controlla avvisi temporanei
+      try{
+        const condIds=[...new Set(profiles.map(p=>p.cond_id).filter(Boolean))].join(",");
+        const av=await GET("avvisi","tipo=eq.temporaneo&cond_id=in.("+condIds+")&select=id&limit=1",auth.access_token);
+        if(av?.length>0){
+          const u={token:auth.access_token,...profiles[0],email:auth.user.email,allProfiles:profiles.length>1?profiles:undefined};
+          onLogin({...u,_startView:"avvisi"});
+          setLoading(false); return;
+        }
+      }catch(e){}
       if(profiles[0].role==="inquilino"){
         onLogin({token:auth.access_token,...profiles[0],email:auth.user.email,isInquilino:true});
         setLoading(false); return;
@@ -464,6 +486,7 @@ function AdminPanel({user,onLogout,view,setView}) {
     {id:"documenti",   label:"Documenti",        icon:"📁"},
     {id:"generali",    label:"Doc. Generali",    icon:"📋"},
     {id:"scadenze",    label:"Rate in Scadenza", icon:"⏰"},
+    {id:"avvisi",      label:"Avvisi",            icon:"📢"},
     {id:"segnalazioni",label:"Segnalazioni",     icon:"🚨"},
     {id:"contatti",    label:"Contatti Studio",  icon:"📞"},
   ];
@@ -479,6 +502,7 @@ function AdminPanel({user,onLogout,view,setView}) {
           {view==="documenti"    && <AdminDocumenti tok={user.token}/>}
           {view==="generali"     && <AdminGeneralDocs tok={user.token}/>}
           {view==="scadenze"     && <AdminScadenze tok={user.token}/>}
+          {view==="avvisi"       && <AdminAvvisi tok={user.token}/>}
           {view==="segnalazioni" && <AdminSegnalazioni tok={user.token}/>}
           {view==="contatti"     && <AdminContatti tok={user.token}/>}
         </div>
@@ -1697,6 +1721,109 @@ function AdminScadenze({tok}) {
   );
 }
 
+// ── Admin Avvisi ──────────────────────────────────────────────────────────────
+function AdminAvvisi({tok}) {
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const [selCond,setSelCond]=useState(()=>localStorage.getItem('adminSelCond')||"");
+  const [avvisi,setAvvisi]=useState([]); const [loading,setLoading]=useState(false);
+  const [modal,setModal]=useState(false);
+  useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+  useEffect(()=>{ if(selCond) localStorage.setItem('adminSelCond',selCond); },[selCond]);
+  useEffect(()=>{ loadAvvisi(); },[selCond,tok]);
+
+  const loadAvvisi=async()=>{
+    if(!selCond) return; setLoading(true);
+    try{ setAvvisi(await GET("avvisi","cond_id=eq."+selCond+"&order=created_at.desc",tok)||[]); }
+    catch(e){}
+    setLoading(false);
+  };
+
+  const elimina=async id=>{ if(!window.confirm("Eliminare questo avviso?")) return; try{await DEL("avvisi","id=eq."+id,tok); loadAvvisi();}catch(e){alert(e.message);} };
+
+  const isScaduto=a=>{
+    if(a.tipo!=="temporaneo") return false;
+    const scad=new Date(a.created_at);
+    scad.setDate(scad.getDate()+15);
+    return scad<new Date();
+  };
+  const giorniRimasti=a=>{
+    const scad=new Date(a.created_at);
+    scad.setDate(scad.getDate()+15);
+    return Math.max(0,Math.ceil((scad-new Date())/(1000*60*60*24)));
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div><h2 className="text-2xl font-black text-gray-800">Gestione Avvisi</h2><p className="text-gray-400 text-sm">Avvisi condominiali — temporanei (15gg) e generali</p></div>
+        <Btn onClick={()=>setModal(true)}>+ Nuovo avviso</Btn>
+      </div>
+      <div className="mb-5"><Sel label="Condominio" value={selCond} onChange={e=>setSelCond(e.target.value)}>{condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}</Sel></div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        {loading?<Spinner/>:!avvisi.length?<EmptyState icon="📢" text="Nessun avviso per questo condominio."/>
+        :avvisi.map((a,i)=>(
+          <div key={a.id} className={"flex items-center justify-between p-4 "+(i<avvisi.length-1?"border-b border-gray-50":"")+(isScaduto(a)?" bg-gray-50 opacity-60":"")}>
+            <div className="flex items-center gap-3">
+              <span className={"text-xs px-2 py-0.5 rounded-full font-semibold "+(a.tipo==="temporaneo"?"bg-amber-100 text-amber-700":"bg-blue-100 text-blue-700")}>{a.tipo==="temporaneo"?"⏱ Temporaneo":"📌 Generale"}</span>
+              <div>
+                <p className="font-medium text-gray-800 text-sm">{a.titolo}</p>
+                <p className="text-xs text-gray-400">{new Date(a.created_at).toLocaleDateString("it-IT")}{a.tipo==="temporaneo"?(" · "+( isScaduto(a)?"Scaduto":"Scade tra "+giorniRimasti(a)+" gg")):""}</p>
+              </div>
+            </div>
+            <Btn variant="danger" onClick={()=>elimina(a.id)}>Elimina</Btn>
+          </div>
+        ))}
+      </div>
+      {modal&&<AvvisoModal condominii={condominii} selCond={selCond} tok={tok} onClose={()=>{setModal(false);loadAvvisi();}}/>}
+    </div>
+  );
+}
+
+function AvvisoModal({condominii,selCond,tok,onClose}) {
+  const SBU=import.meta.env.VITE_SUPABASE_URL;
+  const [titolo,setTitolo]=useState(""); const [tipo,setTipo]=useState("temporaneo");
+  const [cond,setCond]=useState(selCond); const [file,setFile]=useState(null);
+  const [saving,setSaving]=useState(false);
+
+  const salva=async()=>{
+    if(!titolo||!file){alert("Inserisci titolo e file PDF."); return;}
+    setSaving(true);
+    try{
+      const ext=file.name.split(".").pop();
+      const storagePath="avvisi/"+cond+"/"+Date.now()+"."+ext;
+      await uploadFile("avvisi",storagePath,file,tok);
+      await POST("avvisi",{titolo,tipo,cond_id:Number(cond),storage_path:storagePath,nome_file:file.name},tok);
+      onClose();
+    }catch(e){alert(e.message);}
+    setSaving(false);
+  };
+
+  return (
+    <Modal title="Nuovo Avviso" onClose={onClose}>
+      <Inp label="Titolo avviso" value={titolo} onChange={e=>setTitolo(e.target.value)} placeholder="Es. Chiusura ascensore per manutenzione"/>
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <Sel label="Tipo" value={tipo} onChange={e=>setTipo(e.target.value)}>
+            <option value="temporaneo">⏱ Temporaneo (15 giorni)</option>
+            <option value="generale">📌 Generale (permanente)</option>
+          </Sel>
+        </div>
+        <div className="flex-1">
+          <Sel label="Condominio" value={cond} onChange={e=>setCond(e.target.value)}>
+            {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+          </Sel>
+        </div>
+      </div>
+      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">File PDF *</label>
+      <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
+      <div className="flex justify-end gap-3 pt-2">
+        <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+        <Btn onClick={salva} disabled={saving}>{saving?"Salvataggio...":"Pubblica avviso"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Admin Segnalazioni ────────────────────────────────────────────────────────
 function AdminSegnalazioni({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome&order=nome",tok),[tok]);
@@ -1936,12 +2063,14 @@ function CondAccount({user,onLogout}) {
 
 // ── Condomino ─────────────────────────────────────────────────────────────────
 function CondominoPanel({user,setUser,onLogout,view,setView}) {
+  useEffect(()=>{ if(user._startView) setView(user._startView); },[]);
   const {data:contattiArr}=useData(()=>GET("contatti","id=eq.1",user.token),[user.token]);
   const condo=user.condominii;
   const isEx = user.stato==="ex_condomino";
   const navBase = isEx
     ? [{id:"docs",label:"Documenti",icon:"📄"},{id:"account",label:"Il mio account",icon:"⚙️"}]
     : [
+        {id:"avvisi",       label:"Avvisi",         icon:"📢"},
         {id:"docs",         label:"Documenti",     icon:"📄"},
         {id:"generali",     label:"Doc. Generali", icon:"📋"},
         {id:"inq",          label:"Inquilini",      icon:"🏠"},
@@ -1953,7 +2082,7 @@ function CondominoPanel({user,setUser,onLogout,view,setView}) {
       ];
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar items={navBase} active={view} onSelect={setView} user={user} onLogout={onLogout}/>
+      <Sidebar items={navBase} active={view} onSelect={setView} user={user} onLogout={onLogout} setUser={setUser}/>
       <div className="flex flex-col flex-1 min-h-screen">
         <div className="flex-1 p-8 overflow-auto">
           <div className="max-w-3xl mx-auto">
@@ -1967,6 +2096,7 @@ function CondominoPanel({user,setUser,onLogout,view,setView}) {
               <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-xl">🏢</div>
               <div><p className="text-sm font-bold text-gray-800">{condo?.nome||"Condominio"}</p><p className="text-xs text-gray-400">{condo?.indirizzo} · {condo?.cap} {condo?.citta} · Int. {user.interno}</p></div>
             </div>
+            {view==="avvisi"       && <CondAvvisi user={user}/>}
             {view==="docs"         && <CondDocs user={user} soloPersonali={isEx}/>}
             {view==="generali"     && !isEx && <CondGeneralDocs user={user}/>}
             {view==="inq"          && !isEx && <CondInquilini user={user}/>}
@@ -1984,6 +2114,13 @@ function CondominoPanel({user,setUser,onLogout,view,setView}) {
 }
 
 function CondDocs({user, soloPersonali=false, inquilinoMode=false}) {
+  // Tutti i cond_id dell'utente
+  const allCondIds=user.allProfiles
+    ? [...new Set(user.allProfiles.map(p=>p.cond_id).filter(Boolean))].join(",")
+    : String(user.cond_id);
+  const tuttiStabili=user.allProfiles
+    ? [...new Map(user.allProfiles.filter(p=>p.cond_id&&p.condominii).map(p=>[p.cond_id,p.condominii])).entries()].map(([id,c])=>({id:String(id),nome:c?.nome||"Stabile"}))
+    : [];
   const [sezione,setSezione]=useState(soloPersonali?"personal":"cond");
   const [filtro,setFiltro]=useState("");
   const qsCond=filtro
@@ -2211,6 +2348,104 @@ function CondRate({user}) {
         </div>
       )}
       <p className="text-xs text-gray-400 mt-4 text-center">Per informazioni sugli importi contatta lo studio.</p>
+    </div>
+  );
+}
+
+function CondAvvisi({user}) {
+  const SBU=import.meta.env.VITE_SUPABASE_URL;
+  const SBK=import.meta.env.VITE_SUPABASE_KEY;
+  const [avvisi,setAvvisi]=useState([]); const [loading,setLoading]=useState(true);
+  const [pdfUrl,setPdfUrl]=useState(null); const [pdfTitolo,setPdfTitolo]=useState("");
+
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      try{
+        const allCondIds=user.allProfiles
+          ?[...new Set(user.allProfiles.map(p=>p.cond_id).filter(Boolean))].join(",")
+          :String(user.cond_id);
+        const oggi=new Date().toISOString();
+        // Temporanei non scaduti (< 15gg) + generali
+        const res=await fetch(SBU+"/rest/v1/avvisi?cond_id=in.("+allCondIds+")&order=created_at.desc&select=*,condominii(nome)",
+          {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
+        const all=await res.json()||[];
+        // Filtra temporanei scaduti lato client
+        const attivi=all.filter(a=>{
+          if(a.tipo==="generale") return true;
+          const scad=new Date(a.created_at);
+          scad.setDate(scad.getDate()+15);
+          return scad>new Date();
+        });
+        setAvvisi(attivi);
+      }catch(e){console.error(e);}
+      setLoading(false);
+    })();
+  },[user.token,user.cond_id]);
+
+  const apriPdf=async(a)=>{
+    try{
+      const url=await getSignedUrl("avvisi",a.storage_path,user.token);
+      setPdfUrl(url); setPdfTitolo(a.titolo);
+    }catch(e){alert("Impossibile aprire il documento: "+e.message);}
+  };
+
+  const temporanei=avvisi.filter(a=>a.tipo==="temporaneo");
+  const generali=avvisi.filter(a=>a.tipo==="generale");
+  const giorniRimasti=a=>{
+    const scad=new Date(a.created_at);
+    scad.setDate(scad.getDate()+15);
+    return Math.max(0,Math.ceil((scad-new Date())/(1000*60*60*24)));
+  };
+
+  const AvvisoCard=({a})=>(
+    <div className="flex items-center justify-between p-4 hover:bg-gray-50 transition cursor-pointer" onClick={()=>apriPdf(a)}>
+      <div className="flex items-center gap-3">
+        <div className={"w-10 h-10 rounded-xl flex items-center justify-center text-xl "+(a.tipo==="temporaneo"?"bg-amber-50":"bg-blue-50")}>📄</div>
+        <div>
+          <p className="font-medium text-gray-800 text-sm">{a.titolo}</p>
+          <p className="text-xs text-gray-400">
+            {a.condominii?.nome} · {new Date(a.created_at).toLocaleDateString("it-IT")}
+            {a.tipo==="temporaneo"&&<span className="ml-1 text-amber-600">· scade tra {giorniRimasti(a)}gg</span>}
+          </p>
+        </div>
+      </div>
+      <span className="text-xs text-blue-600 font-medium">👁 Visualizza</span>
+    </div>
+  );
+
+  return (
+    <div>
+      <h2 className="text-2xl font-black text-gray-800 mb-5">Avvisi</h2>
+      {loading?<Spinner/>:!avvisi.length?<div className="bg-white rounded-2xl border border-gray-100 shadow-sm"><EmptyState icon="📢" text="Nessun avviso attivo."/></div>:(
+        <>
+          {temporanei.length>0&&(
+            <div className="mb-5">
+              <p className="text-xs font-bold text-amber-600 uppercase tracking-wide mb-2">⏱ Avvisi Temporanei</p>
+              <div className="bg-white rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
+                {temporanei.map((a,i)=><div key={a.id} className={i<temporanei.length-1?"border-b border-gray-50":""}><AvvisoCard a={a}/></div>)}
+              </div>
+            </div>
+          )}
+          {generali.length>0&&(
+            <div>
+              <p className="text-xs font-bold text-blue-600 uppercase tracking-wide mb-2">📌 Avvisi Generali</p>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                {generali.map((a,i)=><div key={a.id} className={i<generali.length-1?"border-b border-gray-50":""}><AvvisoCard a={a}/></div>)}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {pdfUrl&&(
+        <div className="fixed inset-0 bg-black/70 flex flex-col z-50">
+          <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200">
+            <p className="font-semibold text-gray-800 text-sm">{pdfTitolo}</p>
+            <button onClick={()=>{setPdfUrl(null);setPdfTitolo("");}} className="text-gray-500 hover:text-gray-800 font-bold text-xl px-2">×</button>
+          </div>
+          <iframe src={pdfUrl+"#toolbar=0&navpanes=0&scrollbar=1"} className="flex-1 w-full border-0" title={pdfTitolo}/>
+        </div>
+      )}
     </div>
   );
 }
