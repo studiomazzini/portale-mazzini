@@ -739,7 +739,7 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
       {mode==="edit"&&<Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>}
       <Inp label="Email 2" type="email" value={f.email2||""} onChange={e=>s("email2",e.target.value)} hint="Riceve le notifiche insieme alla email principale"/>
       <Sel label="Ruolo" value={f.role||"condomino"} onChange={e=>s("role",e.target.value)}>
-        <option value="condomino">Condomino</option>
+        <option value="condomino">Proprietario</option>
         <option value="inquilino">Inquilino</option>
       </Sel>
       <Sel label="Condominio" value={f.cond_id} onChange={e=>s("cond_id",e.target.value)}>
@@ -759,7 +759,7 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
 function AdminUtenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
-  const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(()=>localStorage.getItem("adminSelCond")||""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
+  const [search,setSearch]=useState(""); const [filterCond,setFilterCond]=useState(()=>localStorage.getItem("adminSelCond")||""); const [filtroRuolo,setFiltroRuolo]=useState(""); const [page,setPage]=useState(0); const [hasMore,setHasMore]=useState(false);
   const [modal,setModal]=useState(null);
   const load=useCallback(async()=>{
     setLoading(true); setErr("");
@@ -773,7 +773,7 @@ function AdminUtenti({tok}) {
     setLoading(false);
   },[tok,search,filterCond,page]);
   useEffect(()=>{load();},[load]);
-  useEffect(()=>setPage(0),[search,filterCond]);
+  useEffect(()=>setPage(0),[search,filterCond,filtroRuolo]);
   const save=async f=>{
     try{
       if(modal.mode==="add"){
@@ -1308,6 +1308,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
             {righe.map((r,i)=>(
               <div key={i} className={"flex items-center justify-between px-3 py-2 text-sm "+(i<righe.length-1?"border-b border-gray-50":"")}>
                 <span className="font-medium text-gray-700">Int. {r.unita}</span>
+                      {r.role==="inquilino"&&<span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full ml-1">Inquilino</span>}
                 <span className="text-xs text-gray-400">
                   {rateColonne.map(rc=>"€"+r.importi[rc.colonna]).join(" · ")}
                 </span>
@@ -2585,11 +2586,13 @@ function CondSegnalazioni({user}) {
 function InquilinoPanel({user, setUser}) {
   const [view,setView]=useState("profilo");
   const nav=[
-    {id:"profilo", label:"Il mio profilo", icon:"👤"},
-    {id:"docs",    label:"Documenti",       icon:"📁"},
-    {id:"generali",label:"Doc. Generali",   icon:"📋"},
-    {id:"rate",    label:"Le mie rate",     icon:"💶"},
-    {id:"account", label:"Account",         icon:"⚙️"},
+    {id:"avvisi",   label:"Avvisi",          icon:"📢"},
+    {id:"profilo",  label:"Il mio profilo",  icon:"👤"},
+    {id:"docs",     label:"Documenti",       icon:"📁"},
+    {id:"generali", label:"Doc. Generali",   icon:"📋"},
+    {id:"rate",     label:"Le mie rate",     icon:"💶"},
+    {id:"segnalazioni",label:"Segnalazioni", icon:"🚨"},
+    {id:"account",  label:"Account",         icon:"⚙️"},
   ];
   return (
     <div className="flex h-screen bg-gray-50">
@@ -2616,11 +2619,13 @@ function InquilinoPanel({user, setUser}) {
       </div>
       <div className="flex-1 p-8 overflow-auto">
         <div className="max-w-3xl mx-auto">
-          {view==="profilo"  && <CondProfilo user={user} setUser={setUser}/>}
-          {view==="docs"     && <CondDocs user={user} inquilinoMode={true}/>}
-          {view==="generali" && <CondGeneralDocs user={user} inquilinoMode={true}/>}
-          {view==="rate"     && <CondRate user={user}/>}
-          {view==="account"  && <CondAccount user={user} setUser={setUser}/>}
+          {view==="avvisi"       && <CondAvvisi user={user}/>}
+          {view==="profilo"      && <CondProfilo user={user} setUser={setUser}/>}
+          {view==="docs"         && <CondDocs user={user} inquilinoMode={true}/>}
+          {view==="generali"     && <CondGeneralDocs user={user} inquilinoMode={true}/>}
+          {view==="rate"         && <CondRate user={user}/>}
+          {view==="segnalazioni" && <CondSegnalazioni user={user}/>}
+          {view==="account"      && <CondAccount user={user} setUser={setUser}/>}
         </div>
       </div>
     </div>
