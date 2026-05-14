@@ -828,7 +828,7 @@ function AdminUtenti({tok}) {
         {loading?<Spinner/>:!users.length?<EmptyState icon="👥" text="Nessun utente trovato."/>:users.map((u,i)=>(
           <div key={u.id} className={`flex items-center justify-between p-4 ${i<users.length-1?"border-b border-gray-50":""}`}>
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-sm">{u.name?.charAt(0)}</div>
+              <div className={"w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm">{u.name?.charAt(0)}</div>
               <div>
                 <div className="flex items-center gap-2"><p className="font-semibold text-gray-800 text-sm">{u.name}</p><StatoUtente s={u.stato}/></div>
                 <p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p>
