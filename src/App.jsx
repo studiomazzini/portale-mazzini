@@ -630,7 +630,7 @@ function AdminCondominii({tok}) {
   const [modal,setModal]=useState(null);
   const [expanded,setExpanded]=useState(null);
   const [importStabili,setImportStabili]=useState(false);
-  const save=async f=>{ try{modal.mode==="add"?await POST("condominii",f,tok):await PATCH("condominii",`id=eq.${f.id}`,f,tok); setModal(null); reload();}catch(e){alert(e.message);} };
+  const save=async f=>{ const intFlds=["unita","ini_ese","fine_ese"]; const fClean=Object.fromEntries(Object.entries(f).map(([k,v])=>[k,intFlds.includes(k)?(v===""||v==null?null:Number(v)):v])); try{modal.mode==="add"?await POST("condominii",fClean,tok):await PATCH("condominii","id=eq."+f.id,fClean,tok); setModal(null); reload();}catch(e){alert(e.message);} };
   const remove=async id=>{ if(!window.confirm("Eliminare?")) return; try{await DEL("condominii",`id=eq.${id}`,tok); reload();}catch(e){alert(e.message);} };
   return (
     <div>
