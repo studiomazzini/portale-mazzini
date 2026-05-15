@@ -1970,10 +1970,13 @@ function CondProfilo({user, setUser}) {
             body:JSON.stringify({
               to:[adminEmail],
               subject:"Modifica anagrafica — "+nome_display,
-              html:"<p>Il condomino <strong>"+nome_display+"</strong> ha modificato la propria anagrafica.</p>"
-                +"<p><strong>Condominio:</strong> "+user.condominii?.nome+"</p>"
-                +"<p><strong>Interno:</strong> "+user.interno+"</p>"
-                +"<p>Effettua il login al portale per visualizzare i dati aggiornati.</p>"
+              html:(()=>{
+                const et={titolo:"Titolo",nome:"Nome",cognome:"Cognome",presso:"C/O",via:"Via",localita:"Località",prov:"Prov.",cap:"CAP",telefono:"Tel. 1",telefono2:"Tel. 2",cell:"Cell. 1",cell2:"Cell. 2",email2:"Email 2"};
+                const old={titolo:user.titolo||"",nome:user.nome||"",cognome:user.cognome||"",presso:user.presso||"",via:user.via||"",localita:user.localita||"",prov:user.prov||"",cap:user.cap||"",telefono:user.telefono||"",telefono2:user.telefono2||"",cell:user.cell||"",cell2:user.cell2||"",email2:user.email2||""};
+                const nov={titolo:f.titolo||"",nome:f.nome||"",cognome:f.cognome||"",presso:f.presso||"",via:f.via||"",localita:f.localita||"",prov:f.prov||"",cap:f.cap||"",telefono:f.telefono||"",telefono2:f.telefono2||"",cell:f.cell||"",cell2:f.cell2||"",email2:f.email2||""};
+                const rows=Object.keys(et).filter(k=>old[k]!==nov[k]).map(k=>"<tr><td style='padding:4px 12px 4px 0;color:#666;font-size:14px'><b>"+et[k]+"</b></td><td style='padding:4px 0;font-size:14px'>"+( nov[k]||"<em>(rimosso)</em>")+"</td></tr>").join("");
+                return "<p>Il condomino <b>"+nome_display+"</b> ha modificato la propria anagrafica.</p><p><b>Condominio:</b> "+user.condominii?.nome+" · Int. "+user.interno+"</p>"+(rows?"<table style='border-collapse:collapse;margin-top:10px'>"+rows+"</table>":"<p><em>Nessuna variazione rilevata.</em></p>");
+              })()
             })
           });
         }
