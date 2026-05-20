@@ -1212,7 +1212,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
     setImporting(true); setProgress(0);
     try{
       // 1. Carica utenti del condominio
-      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=eq.condomino&select=id,interno,name",
+      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,interno,name",
         {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
       const utenti=await res.json()||[];
       const mapUtenti={};
@@ -1332,7 +1332,7 @@ function BulkImportiModal({condId,rate,tok,onClose}) {
     (async()=>{
       setLoading(true);
       try{
-        const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=name",tok)||[];
+        const us=await GET("profiles","cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=name",tok)||[];
         setUsers(us);
         const existing={};
         if(us.length){
@@ -1410,7 +1410,7 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
       const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
       const buf=await file.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
       const data=XLSX.utils.sheet_to_json(ws,{defval:""});
-      const users=await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=id,name,interno&order=name`,tok)||[];
+      const users=await GET("profiles",`cond_id=eq.${condId}&role=in.(condomino,inquilino)&select=id,name,interno&order=name`,tok)||[];
       const parsed=[];
       for(const row of data){
         const nome=String(row["Nome"]||row["NOME"]||row["Cognome"]||"").trim();
@@ -1511,7 +1511,7 @@ function AdminDocumenti({tok}) {
   const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false); const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
   useEffect(()=>{ if(selCond) localStorage.setItem('adminSelCond',selCond); },[selCond]);
-  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=eq.condomino&select=id,name,scala,interno&order=name`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
+  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=name`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
   useEffect(()=>{loadDocs();},[tipo,selCond,selUid,tok]);
   const loadDocs=async()=>{
     if(!selCond) return; setLoading(true);
