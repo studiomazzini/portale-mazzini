@@ -1625,9 +1625,18 @@ function AdminScadenze({tok}) {
       const rate=await r1.json();
       if(!Array.isArray(rate)||!rate.length){setRighe([]); setLoading(false); return;}
       const ids=rate.map(r=>r.id).join(",");
-      const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,user_id,rata_id,profiles(name,email)&rata_id=in.("+ids+")",{headers:hdrAdmin});
-      const imp=await r2.json()||[];
-      setRighe(rate.map(r=>({...r,importi:Array.isArray(imp)?imp.filter(i=>i.rata_id===r.id):[]})));
+        const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,user_id,rata_id&rata_id=in.("+ids+")",{headers:hdrAdmin});
+        const imp=await r2.json()||[];
+        // Carica profili separatamente
+        const uids=[...new Set(Array.isArray(imp)?imp.map(i=>i.user_id).filter(Boolean):[])];
+        let profMap={};
+        if(uids.length){
+          const r3=await fetch(SBU+"/rest/v1/profiles?select=id,name,email&id=in.("+uids.join(",")+")",{headers:hdrAdmin});
+          const profs=await r3.json()||[];
+          if(Array.isArray(profs)) profs.forEach(p=>{profMap[p.id]=p;});
+        }
+        const impConProf=Array.isArray(imp)?imp.map(i=>({...i,profiles:profMap[i.user_id]||null})):[];
+        setRighe(rate.map(r=>({...r,importi:impConProf.filter(i=>i.rata_id===r.id)})));
     }catch(e){console.error(e);}
     setLoading(false);
   };
