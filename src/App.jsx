@@ -1610,6 +1610,8 @@ function AdminScadenze({tok}) {
   const SBU = import.meta.env.VITE_SUPABASE_URL;
   const SBK = import.meta.env.VITE_SUPABASE_KEY;
   const hdr = {apikey:SBK, Authorization:"Bearer "+tok};
+  const SVK = import.meta.env.VITE_SUPABASE_SERVICE_KEY||SBK;
+  const hdrAdmin = {apikey:SVK, Authorization:"Bearer "+SVK};
   const [righe,setRighe]=useState([]); const [loading,setLoading]=useState(true);
   const [sending,setSending]=useState({});
 
@@ -1623,7 +1625,7 @@ function AdminScadenze({tok}) {
       const rate=await r1.json();
       if(!Array.isArray(rate)||!rate.length){setRighe([]); setLoading(false); return;}
       const ids=rate.map(r=>r.id).join(",");
-      const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,user_id,rata_id,profiles(name,email)&rata_id=in.("+ids+")",{headers:hdr});
+      const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,user_id,rata_id,profiles(name,email)&rata_id=in.("+ids+")",{headers:hdrAdmin});
       const imp=await r2.json()||[];
       setRighe(rate.map(r=>({...r,importi:Array.isArray(imp)?imp.filter(i=>i.rata_id===r.id):[]})));
     }catch(e){console.error(e);}
@@ -1650,7 +1652,7 @@ function AdminScadenze({tok}) {
         })
       });
       if(res.ok){
-        await fetch(import.meta.env.VITE_SUPABASE_URL+"/rest/v1/rate_condomino?id=eq."+imp.id,{method:"PATCH",headers:{...hdr,"Content-Type":"application/json","Prefer":"return=minimal"},body:JSON.stringify({notificato:true})});
+        await fetch(import.meta.env.VITE_SUPABASE_URL+"/rest/v1/rate_condomino?id=eq."+imp.id,{method:"PATCH",headers:{...hdrAdmin,"Content-Type":"application/json","Prefer":"return=minimal"},body:JSON.stringify({notificato:true})});
         load();
       }else{alert("Errore invio email.");}
     }catch(e){alert(e.message);}
