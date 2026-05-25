@@ -2664,7 +2664,7 @@ function CondSegnalazioni({user}) {
 // ── App Root ──────────────────────────────────────────────────────────────────
 
 // ── Pannello Inquilino ────────────────────────────────────────────────────────
-function InquilinoPanel({user, setUser}) {
+function InquilinoPanel({user, setUser, onLogout}) {
   const [view,setView]=useState("profilo");
   const nav=[
     {id:"avvisi",   label:"Avvisi",          icon:"📢"},
@@ -2749,7 +2749,8 @@ export default function App() {
       {!user && <Login onLogin={handleLogin}/>}
       {user && user.role!=="admin" && user.primo_accesso && <CambioPassword user={user} onComplete={handlePasswordChanged}/>}
       {user && user.role==="admin" && <AdminPanel user={user} onLogout={handleLogout} view={view} setView={setView}/>}
-      {user && user.role!=="admin" && !user.primo_accesso && <CondominoPanel setUser={setUser} user={user} onLogout={handleLogout} view={view} setView={setView}/>}
+      {user && user.role==="inquilino" && !user.primo_accesso && <InquilinoPanel user={user} setUser={setUser} onLogout={handleLogout}/>}
+      {user && user.role!=="admin" && user.role!=="inquilino" && !user.primo_accesso && <CondominoPanel setUser={setUser} user={user} onLogout={handleLogout} view={view} setView={setView}/>}
       {!cookieOk && <CookieBanner onAccept={acceptCookie}/>}
     </>
   );
