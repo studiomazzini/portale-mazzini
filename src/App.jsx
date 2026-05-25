@@ -924,10 +924,14 @@ function AdminImport({tok}) {
             if(nUn) mapByNUn[nUn]=persona;
           }
         } else if(persona.isInquilino){
-          const inqData={nome:nomeCompleto,email:persona.email,tel:persona.telefono,email2:persona.email2};
+          // Crea profilo portale per l'inquilino
+          const inqParsed={...persona, role:"inquilino", interno:nUn?String(nUn):"", nomeCompleto:persona.nomeCompleto, inquilini:[]};
+          parsed.push(inqParsed);
+          // Collega anche all'anagrafica del proprietario
+          const inqData={nome:persona.nomeCompleto,email:persona.email,tel:persona.telefono,email2:persona.email2};
           const propr=nUn?mapByNUn[nUn]:null;
           if(propr) propr.inquilini.push(inqData);
-          else if(parsed.length) parsed[parsed.length-1].inquilini.push(inqData);
+          else if(parsed.length>1) parsed[parsed.length-2].inquilini.push(inqData);
         }
       }
       if(!parsed.length){ setErr("Nessun proprietario trovato. Verifica che la colonna 'Tipo Cond.' contenga 'Proprietario'."); return; }
@@ -959,7 +963,7 @@ function AdminImport({tok}) {
         r._authUserId=authUserId;
         }
         await POST("profiles",{
-          id:uid, auth_user_id:r._authUserId||uid, name:r.nomeCompleto, role:"condomino",
+          id:uid, auth_user_id:r._authUserId||uid, name:r.nomeCompleto, role:r.role||"condomino",
           cond_id:Number(selCond),
           email:isRealEmail(r.email)?r.email:null,
           email2:isRealEmail(r.email2)?r.email2:null,
