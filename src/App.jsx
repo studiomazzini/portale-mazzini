@@ -297,7 +297,6 @@ function ContactFooter({c}) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function Sidebar({items,active,onSelect,user,onLogout,setUser}) {
-  console.log("SIDEBAR allProfiles:", user?.allProfiles?.length, user?.allProfiles?.map(p=>p.cond_id));
   return (
     <div className="w-60 bg-slate-900 min-h-screen flex flex-col flex-shrink-0">
       {user?.allProfiles&&new Set(user.allProfiles.map(p=>String(p.cond_id)).filter(Boolean)).size>1&&(
@@ -2679,11 +2678,23 @@ function InquilinoPanel({user, setUser, onLogout}) {
   return (
     <div className="flex h-screen bg-gray-50">
       <div className="w-64 shrink-0 h-full bg-slate-800 flex flex-col">
+        {user?.allProfiles&&new Set(user.allProfiles.map(p=>String(p.cond_id)).filter(Boolean)).size>1&&(
+          <div className="px-3 pt-3 pb-1">
+            <p className="text-xs text-slate-500 uppercase tracking-wide mb-1 px-1">Stabile</p>
+            <select value={user.id}
+              onChange={e=>{const p=user.allProfiles.find(x=>x.id===e.target.value); if(p&&setUser) setUser({...p,token:user.token,allProfiles:user.allProfiles});}}
+              className="w-full bg-slate-700 text-white text-xs rounded-lg px-2 py-1.5 border border-slate-600 focus:outline-none">
+              {[...new Map(user.allProfiles.filter(p=>p.cond_id).map(p=>[p.cond_id,p])).values()].map(p=>(
+                <option key={p.id} value={p.id}>{p.condominii?.nome||"Stabile"}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="p-5 border-b border-slate-700">
           <div className="w-10 h-10 bg-slate-600 rounded-xl flex items-center justify-center text-white font-black text-lg mb-3">{(user.name||"?").charAt(0).toUpperCase()}</div>
           <p className="text-white font-semibold text-sm truncate">{user.name}</p>
           <p className="text-slate-400 text-xs truncate">{user.condominii?.nome||"—"}</p>
-          <span className="inline-block mt-1 text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full">Inquilino</span>
+          <span className="inline-block mt-1 text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full">{user.role==="inquilino"?"Inquilino":"Proprietario"}</span>
         </div>
         <nav className="flex-1 p-3 space-y-1 overflow-auto">
           {nav.map(n=>(
