@@ -297,8 +297,8 @@ function ContactFooter({c}) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function Sidebar({items,active,onSelect,user,onLogout,setUser}) {
+  console.log("SIDEBAR allProfiles:", user?.allProfiles?.length, user?.allProfiles?.map(p=>p.cond_id));
   return (
-  console.log("SIDEBAR user.allProfiles:", user?.allProfiles?.length, user?.allProfiles?.map(p=>({id:p.id.substring(0,8),cond:p.cond_id,role:p.role})));
     <div className="w-60 bg-slate-900 min-h-screen flex flex-col flex-shrink-0">
       {user?.allProfiles&&new Set(user.allProfiles.map(p=>String(p.cond_id)).filter(Boolean)).size>1&&(
         <div className="px-3 pt-3 pb-1">
