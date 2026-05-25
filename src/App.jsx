@@ -800,7 +800,7 @@ function AdminUtenti({tok}) {
         if(f.email&&utentePre&&f.email!==utentePre.email&&isRealEmail(f.email)){
           try{
             await sb("/auth/v1/admin/users/"+f.id,{method:"PUT",svc:true,body:{email:f.email,email_confirm:true}});
-          }catch(emailErr){console.warn("Impossibile aggiornare email login:",emailErr.message);}
+          }catch(emailErr){if(emailErr.message.includes("duplicate")){alert("Attenzione: l'email inserita è già in uso da un altro account. Il profilo è stato salvato ma l'email di login non è stata aggiornata.");}else{console.warn("Impossibile aggiornare email login:",emailErr.message);}}
         }
         await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,role:f.role||"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:f.email||null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
       }
