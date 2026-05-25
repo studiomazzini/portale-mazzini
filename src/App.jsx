@@ -2723,8 +2723,23 @@ export default function App() {
         const saved=localStorage.getItem("sb_session_v1");
         if(saved){
           const sess=JSON.parse(saved);
-          const profiles=await GET("profiles",`id=eq.${sess.id}&select=*,condominii(*)`,sess.token);
-          if(profiles?.length){ setUser({...sess,...profiles[0]}); setView(sess.role==="admin"?"condominii":"docs"); }
+          const profiles=await GET("profiles","id=eq."+sess.id+"&select=*,condominii(*)",sess.token);
+          if(profiles?.length){
+            let allProfs=[...profiles];
+            try{
+              const byAid=await GET("profiles","auth_user_id=eq."+sess.id+"&select=*,condominii(*)",sess.token)||[];
+              const em=profiles[0].email;
+              let byEm=[];
+              if(em&&!em.includes("@noemail.local")){
+                byEm=await GET("profiles","email=eq."+encodeURIComponent(em)+"&role=neq.admin&select=*,condominii(*)",sess.token)||[];
+              }
+              const seen=new Set(allProfs.map(p=>p.id));
+              byAid.forEach(p=>{if(!seen.has(p.id)){seen.add(p.id);allProfs.push(p);}});
+              byEm.forEach(p=>{if(!seen.has(p.id)){seen.add(p.id);allProfs.push(p);}});
+            }catch(e){}
+            setUser({...sess,...profiles[0],allProfiles:allProfs.length>1?allProfs:undefined});
+            setView(sess.role==="admin"?"condominii":"docs");
+          }
         }
       }catch{}
       setChecking(false);
