@@ -2743,7 +2743,7 @@ export default function App() {
           if(profiles?.length){
             let allProfs=[...profiles];
             try{
-              const byAid=await GET("profiles","auth_user_id=eq."+sess.id+"&select=*,condominii(*)",sess.token)||[];
+              const byAid=await GET("profiles","auth_user_id=eq."+(sess.authId||sess.id)+"&select=*,condominii(*)",sess.token)||[];
               const em=profiles[0].email;
               let byEm=[];
               if(em&&!em.includes("@noemail.local")){
@@ -2764,7 +2764,7 @@ export default function App() {
 
   const acceptCookie=()=>{ localStorage.setItem("cookie_consent_v1","accepted"); setCookieOk(true); };
   const handleLogin=async u=>{
-    try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role}));}catch{}
+    try{localStorage.setItem("sb_session_v1",JSON.stringify({id:u.id,token:u.token,role:u.role,authId:u.auth_user_id||u.id}));}catch{}
     setUser(u);
     setView(u.role==="admin"?"condominii":"docs");
   };
