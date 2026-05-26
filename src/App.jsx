@@ -784,8 +784,17 @@ function AdminUtenti({tok}) {
         }catch(authErr){
           // Email già in uso: crea profilo secondario legato all'utente esistente
           const svk=import.meta.env.VITE_SUPABASE_SERVICE_KEY||tok;
-          const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&limit=1",svk);
-          existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
+          // Usa Admin API per trovare il VERO auth user ID per questa email
+          try{
+            const authRes=await sb("/auth/v1/admin/users?email="+encodeURIComponent(f.email||""),{svc:true});
+            const authData=await authRes.json();
+            existingAuthId=authData?.users?.[0]?.id;
+          }catch(e){}
+          // Fallback: cerca nei profili
+          if(!existingAuthId){
+            const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&order=created_at&limit=1",svk);
+            existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
+          }
           if(!existingAuthId) throw authErr;
           // Usa un UUID casuale come id del profilo secondario
           const fakeEmail=f.cognome.toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
