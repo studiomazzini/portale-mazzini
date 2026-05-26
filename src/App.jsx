@@ -2547,6 +2547,25 @@ function CondAvvisi({user}) {
   );
 }
 
+function InquilinoFormModal({mode, data, onSave, onClose}) {
+  const [f,setF]=useState(data||{nome:"",email:"",tel:"",dal:"",al:""});
+  const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return (
+    <Modal title={mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={onClose}>
+      <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
+      <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
+      <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
+      <div className="flex gap-3">
+        <div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div>
+        <div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div>
+      </div>
+      <div className="flex justify-end gap-3 pt-2">
+        <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
+        <Btn onClick={()=>f.nome&&onSave(f)}>Salva</Btn>
+      </div>
+    </Modal>
+  );
+}
 function CondInquilini({user}) {
   const {data:inq,loading,reload}=useData(()=>GET("inquilini",`user_id=eq.${user.id}&select=*&order=created_at`,user.token),[user.token,user.id]);
   const [modal,setModal]=useState(null);
@@ -2573,15 +2592,7 @@ function CondInquilini({user}) {
           </div>
         ))}
       </div>
-      {modal&&<Modal title={modal.mode==="add"?"Nuovo Inquilino":"Modifica Inquilino"} onClose={()=>setModal(null)}>
-        {(()=>{const [f,setF]=useState(modal.data); const s=(k,v)=>setF(p=>({...p,[k]:v})); return(<>
-          <Inp label="Nome e Cognome" value={f.nome} onChange={e=>s("nome",e.target.value)}/>
-          <Inp label="Email" type="email" value={f.email||""} onChange={e=>s("email",e.target.value)}/>
-          <Inp label="Telefono" value={f.tel||""} onChange={e=>s("tel",e.target.value)}/>
-          <div className="flex gap-3"><div className="flex-1"><Inp label="Inizio" type="date" value={f.dal||""} onChange={e=>s("dal",e.target.value)}/></div><div className="flex-1"><Inp label="Fine" type="date" value={f.al||""} onChange={e=>s("al",e.target.value)} hint="Vuoto = in corso"/></div></div>
-          <div className="flex justify-end gap-3 pt-2"><Btn variant="secondary" onClick={()=>setModal(null)}>Annulla</Btn><Btn onClick={()=>f.nome&&save(f)}>Salva</Btn></div>
-        </>);})()}
-      </Modal>}
+            {modal&&<InquilinoFormModal mode={modal.mode} data={modal.data} onSave={f=>{save(f);setModal(null);}} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
