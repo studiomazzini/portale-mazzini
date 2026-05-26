@@ -351,9 +351,6 @@ function Login({onLogin}) {
       if(loginEmail&&!loginEmail.includes("@noemail.local")){
         byEmail=await GET("profiles",`email=eq.${encodeURIComponent(loginEmail)}&role=neq.admin&select=*,condominii(*)`,auth.access_token)||[];
       }
-      console.log("DBG profilesById:",profilesById.length, profilesById.map(p=>p.cond_id));
-      console.log("DBG byAuthId:",byAuthId.length, byAuthId.map(p=>p.cond_id));
-      console.log("DBG byEmail:",byEmail.length, byEmail.map(p=>p.cond_id));
       const allIds=new Set(profilesById.map(p=>p.id));
       byAuthId.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
       byEmail.forEach(p=>{if(!allIds.has(p.id)){allIds.add(p.id);profilesById.push(p);}});
@@ -383,7 +380,6 @@ function Login({onLogin}) {
       if(profiles.length>1&&profiles[0].role!=="admin"){
         // Controlla se tutti i profili sono nello stesso stabile
         const condIds=new Set(profiles.map(p=>p.cond_id).filter(Boolean));
-      console.log("DBG condIds:",condIds.size,[...condIds],"allProfiles:",allProfiles.length);
         if(condIds.size>1){
           // Stabili diversi → mostra selettore
           setPendingProfiles({list:profiles,token:auth.access_token});
