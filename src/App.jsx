@@ -792,8 +792,8 @@ function AdminUtenti({tok}) {
           }catch(e){}
           // Fallback: cerca nei profili
           if(!existingAuthId){
-            const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&order=created_at&limit=1",svk);
-            existingAuthId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
+            const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&select=id,auth_user_id&order=created_at",svk);
+            existingAuthId=(existing||[]).find(p=>p.auth_user_id&&p.auth_user_id!==p.id)?.auth_user_id||existing?.[0]?.auth_user_id||existing?.[0]?.id;
           }
           if(!existingAuthId) throw authErr;
           // Usa un UUID casuale come id del profilo secondario
