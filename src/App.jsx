@@ -478,12 +478,383 @@ function DocModal({onSave,onClose,bucket,pathPrefix,tok}) {
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
+// ── Pagamenti rate: funzioni di supporto ─────────────────────────────────────
+const normNome = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
+const tokNome = s => normNome(s).split(" ").filter(t=>t.length>1);
+const normCod = s => String(s??"").trim().replace(/^0+(?=\d)/,"");
+const fmtEur = n => "EUR "+Number(n||0).toFixed(2);
+const fmtData = d => d?new Date(d).toLocaleDateString("it-IT"):"";
+const oggiISO = () => new Date().toISOString().slice(0,10);
+
+// Distribuisce i versamenti sulle rate dalla più vecchia alla più recente.
+// Le rate con stato_manuale (forzate dall'admin) restano fuori dal calcolo.
+function calcolaStatoRate(rate, pagamenti){
+  const pags=[...(pagamenti||[])]
+    .sort((a,b)=>String(a.data_pagamento).localeCompare(String(b.data_pagamento)))
+    .map(p=>({d:p.data_pagamento,res:Number(p.importo)||0}));
+  const ordinate=[...(rate||[])].sort((a,b)=>String(a.data_scadenza).localeCompare(String(b.data_scadenza)));
+  let pi=0; const stati={};
+  for(const r of ordinate){
+    const dovuto=Math.round((Number(r.importo)||0)*100)/100;
+    if(r.stato_manuale){ stati[r.key]={stato:r.stato_manuale,manuale:true,dovuto,versato:null,data:null}; continue; }
+    if(dovuto<=0){ stati[r.key]={stato:"nd",manuale:false,dovuto:0,versato:0,data:null}; continue; }
+    let vers=0, data=null;
+    while(pi<pags.length&&vers<dovuto-0.005){
+      const take=Math.min(pags[pi].res,dovuto-vers);
+      vers+=take; pags[pi].res-=take; data=pags[pi].d;
+      if(pags[pi].res<0.005) pi++;
+    }
+    vers=Math.round(vers*100)/100;
+    stati[r.key]={stato:vers>=dovuto-0.005?"pagata":vers>0.005?"parziale":"da_pagare",manuale:false,dovuto,versato:vers,data:vers>0.005?data:null};
+  }
+  const credito=pags.slice(pi).reduce((s,p)=>s+p.res,0);
+  return {stati,credito:Math.round(credito*100)/100};
+}
+
+const StatoRataBadge = ({st,scadenza}) => {
+  if(!st) return null;
+  const scad=scadenza&&String(scadenza).slice(0,10)<oggiISO();
+  const m={
+    pagata:["Pagata","bg-emerald-100 text-emerald-700"],
+    parziale:["Parziale","bg-amber-100 text-amber-700"],
+    da_pagare:[scad?"Non pagata":"Da pagare",scad?"bg-red-100 text-red-600":"bg-slate-100 text-slate-600"],
+    nd:["Importo non definito","bg-gray-100 text-gray-500"],
+  }[st.stato]||["—","bg-gray-100 text-gray-500"];
+  return <span className={"text-xs px-2 py-0.5 rounded-full font-semibold whitespace-nowrap "+m[1]}>{m[0]}{st.manuale?" (manuale)":""}</span>;
+};
+
+// Riga di stato per la pagina "Le mie rate" del condòmino
+const StatoRataCond = ({st,scadenza}) => {
+  if(!st||st.stato==="nd") return null;
+  const scad=scadenza&&String(scadenza).slice(0,10)<oggiISO();
+  if(st.stato==="pagata") return <p className="text-xs text-emerald-600 font-semibold mt-0.5">✓ Pagata{st.data?" il "+fmtData(st.data):""}</p>;
+  if(st.stato==="parziale") return <p className="text-xs text-amber-600 font-semibold mt-0.5">Versati {fmtEur(st.versato)} su {fmtEur(st.dovuto)}</p>;
+  return <p className={"text-xs font-semibold mt-0.5 "+(scad?"text-red-500":"text-slate-500")}>{scad?"Non pagata":"Da pagare"}</p>;
+};
+
+const RiepRateBadge = ({r}) => {
+  if(!r) return null;
+  const cls=r.scadute?"bg-red-100 text-red-600":r.pagate===r.tot?"bg-emerald-100 text-emerald-700":"bg-slate-100 text-slate-600";
+  const txt=r.scadute?(r.scadute===1?"1 rata scaduta":r.scadute+" rate scadute"):"Rate "+r.pagate+"/"+r.tot+" pagate";
+  return <span className={"text-xs px-2 py-0.5 rounded-full font-medium "+cls}>{txt}</span>;
+};
+
+// Legge la stampa "Registrazioni del Giorno" del gestionale (PDF testuale).
+// Lavora per colonne: ogni riga è ancorata a stabile + data; i pezzi del nominativo
+// (anche su due linee, centrati in verticale) vanno alla riga più vicina.
+async function leggiPdfVersamenti(file){
+  const V="4.4.168";
+  const pdfjs=await import(/* @vite-ignore */ "https://cdn.jsdelivr.net/npm/pdfjs-dist@"+V+"/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@"+V+"/build/pdf.worker.min.mjs";
+  const pdf=await pdfjs.getDocument({data:await file.arrayBuffer()}).promise;
+  const RE_DATA=/^(\d{2})\/(\d{2})\/(\d{4})$/, RE_COD=/^\d{1,4}$/;
+  const RE_IMP=/^-?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+\.\d{2})$/;
+  const parseImp=s=>s.includes(",")?parseFloat(s.replace(/\./g,"").replace(",",".")):parseFloat(s);
+  const rows=[]; let altriTipi=0; let scartati=0;
+  for(let p=1;p<=pdf.numPages;p++){
+    const tc=await (await pdf.getPage(p)).getTextContent();
+    const items=tc.items.filter(it=>it.str&&it.str.trim()).map(it=>({s:it.str.trim(),x:it.transform[4],y:it.transform[5],usato:false}));
+    const stessaY=(a,b)=>Math.abs(a.y-b.y)<=2;
+    const ancore=[];
+    for(const d of items){
+      const md=d.s.match(RE_DATA); if(!md) continue;
+      const cod=items.filter(i=>i!==d&&stessaY(i,d)&&i.x<d.x&&RE_COD.test(i.s)).sort((a,b)=>b.x-a.x)[0];
+      if(!cod) continue;
+      const tipo=items.filter(i=>stessaY(i,d)&&i.x>d.x).sort((a,b)=>a.x-b.x)[0];
+      if(!tipo) continue;
+      const imp=items.filter(i=>stessaY(i,d)&&i.x>tipo.x&&RE_IMP.test(i.s)).sort((a,b)=>b.x-a.x)[0];
+      [d,cod,tipo,imp].forEach(i=>{ if(i) i.usato=true; });
+      ancore.push({y:d.y,xTipo:tipo.x,tipo:tipo.s,codice:normCod(cod.s),data:md[3]+"-"+md[2]+"-"+md[1],importo:imp?parseImp(imp.s):null,pezzi:[]});
+    }
+    if(!ancore.length) continue;
+    const xNome=Math.min(...ancore.map(a=>a.xTipo))+5;
+    const yMax=Math.max(...ancore.map(a=>a.y))+9, yMin=Math.min(...ancore.map(a=>a.y))-9;
+    for(const it of items){
+      if(it.usato||it.x<xNome||it.y>yMax||it.y<yMin) continue;
+      const vicina=ancore.reduce((b,a)=>Math.abs(a.y-it.y)<Math.abs(b.y-it.y)?a:b);
+      if(Math.abs(vicina.y-it.y)<9) vicina.pezzi.push(it);
+    }
+    for(const a of ancore.sort((x,y)=>y.y-x.y)){
+      if(!/^vers/i.test(a.tipo)){ altriTipi++; continue; }
+      const linee=[];
+      for(const pz of a.pezzi.sort((x,y)=>y.y-x.y||x.x-y.x)){
+        const l=linee.find(l=>Math.abs(l.y-pz.y)<=2);
+        if(l) l.t.push(pz.s); else linee.push({y:pz.y,t:[pz.s]});
+      }
+      const nome=linee.map(l=>l.t.join(" ")).join(" - ").replace(/\s+/g," ").trim();
+      if(!(a.importo>0)||!nome){ scartati++; continue; }
+      rows.push({codice:a.codice,data:a.data,nome,importo:a.importo});
+    }
+  }
+  // impronta anti-doppione (le righe identiche nello stesso file restano distinte)
+  const visti={};
+  for(const r of rows){
+    const base=r.codice+"|"+r.data+"|"+normNome(r.nome)+"|"+r.importo.toFixed(2);
+    visti[base]=(visti[base]||0)+1;
+    r.chiave=base+"|"+visti[base];
+  }
+  return {rows,altriTipi,scartati};
+}
+
+// ── Admin: registrazione pagamenti da PDF ────────────────────────────────────
+function AdminPagamenti({tok}) {
+  const [righe,setRighe]=useState([]); const [profPerCond,setProfPerCond]=useState({});
+  const [loading,setLoading]=useState(false); const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState(""); const [esito,setEsito]=useState(null); const [info,setInfo]=useState(null);
+
+  const carica=async file=>{
+    if(!file) return;
+    setErr(""); setEsito(null); setRighe([]); setInfo(null); setLoading(true);
+    try{
+      const {rows,altriTipi,scartati}=await leggiPdfVersamenti(file);
+      if(!rows.length) throw new Error("Nessun versamento trovato nel PDF. Verifica che sia la stampa \"Registrazioni del Giorno\" del gestionale.");
+      const conds=await GET("condominii","select=id,nome,codice",tok)||[];
+      const perCod={}; conds.forEach(c=>{ if(c.codice!=null&&String(c.codice).trim()!=="") perCod[normCod(c.codice)]=c; });
+      const condIds=[...new Set(rows.map(r=>perCod[r.codice]?.id).filter(Boolean))];
+      const ppc={};
+      for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,interno,cond_id,role&order=name",tok)||[];
+
+      // 1) abbinamento per nominativo
+      const out=rows.map(r=>{
+        const c=perCod[r.codice];
+        const base={...r,condId:c?.id||null,condNome:c?.nome||"",userId:"",esito:"nocond",cands:[]};
+        if(!c) return base;
+        const lista=ppc[c.id]||[]; const n=normNome(r.nome); const tt=tokNome(r.nome);
+        let cands=lista.filter(p=>normNome(p.name)===n);
+        if(!cands.length&&tt.length) cands=lista.filter(p=>{const pt=tokNome(p.name); return pt.length&&(tt.every(t=>pt.includes(t))||pt.every(t=>tt.includes(t)));});
+        const prop=cands.filter(p=>p.role!=="inquilino"); if(prop.length) cands=prop;
+        if(cands.length===1) return {...base,userId:cands[0].id,esito:"ok",cands};
+        if(cands.length>1) return {...base,esito:"multi",cands};
+        return {...base,esito:"nomatch"};
+      });
+
+      // 2) più unità con lo stesso nome: scelgo quella con la prima rata aperta pari all'importo
+      const ambigui=out.filter(r=>r.esito==="multi");
+      if(ambigui.length){
+        const ids=[...new Set(ambigui.flatMap(r=>r.cands.map(p=>p.id)))];
+        const ri=await GET("rate_condomino","user_id=in.("+ids.join(",")+")&select=rata_id,user_id,importo,stato_manuale",tok)||[];
+        const rataIds=[...new Set(ri.map(x=>x.rata_id))];
+        const rd=rataIds.length?await GET("rate_condominio","id=in.("+rataIds.join(",")+")&select=id,data_scadenza",tok)||[]:[];
+        const pg=await GET("pagamenti","user_id=in.("+ids.join(",")+")&select=user_id,importo,data_pagamento",tok)||[];
+        const virtuali={};
+        const primaAperta=uid=>{
+          const lista=ri.filter(x=>x.user_id===uid).map(x=>({key:x.rata_id,importo:x.importo,stato_manuale:x.stato_manuale,data_scadenza:rd.find(d=>d.id===x.rata_id)?.data_scadenza||""}));
+          const {stati}=calcolaStatoRate(lista,[...pg.filter(p=>p.user_id===uid),...(virtuali[uid]||[])]);
+          const aperta=[...lista].sort((a,b)=>String(a.data_scadenza).localeCompare(String(b.data_scadenza))).find(x=>["da_pagare","parziale"].includes(stati[x.key]?.stato));
+          return aperta?Math.round((stati[aperta.key].dovuto-stati[aperta.key].versato)*100)/100:null;
+        };
+        for(const r of ambigui){
+          const ok=r.cands.filter(p=>{const res=primaAperta(p.id); return res!=null&&Math.abs(res-r.importo)<0.01;});
+          const scelto=ok[0]||r.cands[0];
+          r.userId=scelto.id; r.esito=ok.length===1?"importo":"verifica";
+          (virtuali[scelto.id]=virtuali[scelto.id]||[]).push({user_id:scelto.id,importo:r.importo,data_pagamento:r.data});
+        }
+      }
+
+      // 3) versamenti già registrati in precedenza
+      try{
+        const lista=out.map(r=>"\""+r.chiave.replace(/"/g,"")+"\"").join(",");
+        const gia=await GET("pagamenti","chiave_import=in.("+encodeURIComponent(lista)+")&select=chiave_import",tok)||[];
+        const set=new Set(gia.map(g=>g.chiave_import));
+        out.forEach(r=>{ if(set.has(r.chiave)){ r.esito="gia"; r.userId=""; } });
+      }catch(e){ console.warn("Controllo doppioni:",e.message); }
+
+      setProfPerCond(ppc); setRighe(out); setInfo({altriTipi,scartati});
+    }catch(e){ setErr(e.message); }
+    setLoading(false);
+  };
+
+  const setUser=(i,uid)=>setRighe(rs=>rs.map((r,j)=>j===i?{...r,userId:uid}:r));
+
+  const conferma=async()=>{
+    const daReg=righe.filter(r=>r.userId&&r.condId&&r.esito!=="gia");
+    if(!daReg.length){ alert("Nessun versamento da registrare."); return; }
+    if(!window.confirm("Registrare "+daReg.length+" versamenti?")) return;
+    setSaving(true); setErr("");
+    try{
+      const body=daReg.map(r=>({user_id:r.userId,cond_id:r.condId,data_pagamento:r.data,importo:r.importo,nominativo:r.nome,origine:"import_pdf",chiave_import:r.chiave}));
+      const ins=await sb("/rest/v1/pagamenti?on_conflict=chiave_import",{method:"POST",body,prefer:"return=representation,resolution=ignore-duplicates",token:tok});
+      const n=Array.isArray(ins)?ins.length:0;
+      setEsito({inseriti:n,doppi:daReg.length-n,nonReg:righe.length-daReg.length}); setRighe([]);
+    }catch(e){ setErr(e.message); }
+    setSaving(false);
+  };
+
+  const ESITI={
+    ok:["Abbinato","bg-emerald-100 text-emerald-700"],
+    importo:["Abbinato per importo","bg-emerald-50 text-emerald-600"],
+    verifica:["Da verificare","bg-amber-100 text-amber-700"],
+    nomatch:["Non abbinato","bg-red-100 text-red-600"],
+    nocond:["Stabile non nel portale","bg-gray-100 text-gray-500"],
+    gia:["Già registrato","bg-slate-100 text-slate-500"],
+  };
+  const conta=k=>righe.filter(r=>r.esito===k).length;
+  const daRegistrare=righe.filter(r=>r.userId&&r.condId&&r.esito!=="gia");
+  const totale=daRegistrare.reduce((s,r)=>s+r.importo,0);
+
+  return (
+    <div>
+      <h2 className="text-2xl font-black text-gray-800 mb-2">Registra Pagamenti</h2>
+      <p className="text-gray-400 text-sm mb-5">Carica la stampa "Registrazioni del Giorno" del gestionale (PDF). I versamenti vengono abbinati per stabile e nominativo; controlla l'anteprima prima di confermare.</p>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-4">
+        <input type="file" accept="application/pdf,.pdf" disabled={loading||saving}
+          onChange={e=>{carica(e.target.files?.[0]); e.target.value="";}}
+          className="text-sm text-gray-600 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-blue-600 file:text-white file:font-medium"/>
+      </div>
+      <ErrBox msg={err}/>
+      {loading&&<Spinner/>}
+      {esito&&(
+        <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm rounded-xl px-4 py-3 mb-4">
+          Registrati <strong>{esito.inseriti}</strong> versamenti.
+          {esito.doppi>0&&<> {esito.doppi} erano già presenti e sono stati saltati.</>}
+          {esito.nonReg>0&&<> {esito.nonReg} righe non registrate (non abbinate, stabile assente o già presenti).</>}
+        </div>
+      )}
+      {!loading&&righe.length>0&&(
+        <>
+          <div className="flex flex-wrap gap-2 mb-3 text-xs">
+            {Object.keys(ESITI).map(k=>conta(k)>0&&<span key={k} className={"px-2 py-1 rounded-full font-medium "+ESITI[k][1]}>{ESITI[k][0]}: {conta(k)}</span>)}
+            {info?.altriTipi>0&&<span className="px-2 py-1 rounded-full bg-gray-50 text-gray-400">Altre registrazioni ignorate: {info.altriTipi}</span>}
+          </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+                <th className="p-3">Stabile</th><th className="p-3">Data</th><th className="p-3">Nominativo (PDF)</th><th className="p-3 text-right">Importo</th><th className="p-3">Condòmino</th><th className="p-3">Esito</th>
+              </tr></thead>
+              <tbody>
+                {righe.map((r,i)=>(
+                  <tr key={r.chiave} className="border-b border-gray-50 align-top">
+                    <td className="p-3"><p className="font-semibold text-gray-700">{r.codice}</p><p className="text-xs text-gray-400">{r.condNome||"—"}</p></td>
+                    <td className="p-3 whitespace-nowrap text-gray-600">{fmtData(r.data)}</td>
+                    <td className="p-3 text-gray-700">{r.nome}</td>
+                    <td className="p-3 text-right font-semibold text-gray-800 whitespace-nowrap">{fmtEur(r.importo)}</td>
+                    <td className="p-3">
+                      {r.condId&&r.esito!=="gia"?(
+                        <select value={r.userId} onChange={e=>setUser(i,e.target.value)}
+                          className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50 max-w-xs">
+                          <option value="">— non registrare —</option>
+                          {(profPerCond[r.condId]||[]).map(p=><option key={p.id} value={p.id}>{p.name} · Int.{p.interno||"—"}{p.role==="inquilino"?" (inq.)":""}</option>)}
+                        </select>
+                      ):<span className="text-xs text-gray-400">—</span>}
+                    </td>
+                    <td className="p-3"><span className={"text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap "+ESITI[r.esito][1]}>{ESITI[r.esito][0]}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-sm text-gray-500">Da registrare: <strong>{daRegistrare.length}</strong> versamenti · {fmtEur(totale)}</p>
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={()=>{setRighe([]);setInfo(null);}} disabled={saving}>Annulla</Btn>
+              <Btn onClick={conferma} disabled={saving||!daRegistrare.length}>{saving?"Registrazione...":"Conferma e registra"}</Btn>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Admin: stato rate e versamenti di un utente ──────────────────────────────
+function RatePagamentiModal({utente,tok,onClose}) {
+  const [dati,setDati]=useState(null); const [err,setErr]=useState("");
+  const [nuovo,setNuovo]=useState({data:oggiISO(),importo:""}); const [busy,setBusy]=useState(false);
+  const load=useCallback(async()=>{
+    setErr("");
+    try{
+      const rd=await GET("rate_condominio","cond_id=eq."+utente.cond_id+"&select=id,numero_rata,data_scadenza,descrizione&order=data_scadenza",tok)||[];
+      const ri=rd.length?await GET("rate_condomino","user_id=eq."+utente.id+"&rata_id=in.("+rd.map(r=>r.id).join(",")+")&select=id,rata_id,importo,stato_manuale",tok)||[]:[];
+      const pg=await GET("pagamenti","user_id=eq."+utente.id+"&select=*&order=data_pagamento.desc",tok)||[];
+      setDati({rd,ri,pg});
+    }catch(e){ setErr(e.message); }
+  },[utente.id,utente.cond_id,tok]);
+  useEffect(()=>{load();},[load]);
+
+  const rate=(dati?.rd||[]).map(r=>{const i=dati.ri.find(x=>x.rata_id===r.id); return {...r,key:r.id,importo:i?.importo,stato_manuale:i?.stato_manuale||null,rcId:i?.id||null};});
+  const {stati,credito}=calcolaStatoRate(rate,dati?.pg||[]);
+  const totDovuto=rate.reduce((s,r)=>s+(Number(r.importo)||0),0);
+  const totVersato=(dati?.pg||[]).reduce((s,p)=>s+Number(p.importo),0);
+
+  const forza=async(rcId,val)=>{ setBusy(true); try{ await PATCH("rate_condomino","id=eq."+rcId,{stato_manuale:val||null},tok); await load(); }catch(e){alert(e.message);} setBusy(false); };
+  const aggiungi=async()=>{
+    const imp=Number(String(nuovo.importo).replace(",","."));
+    if(!nuovo.data||!(imp>0)){ alert("Inserisci data e importo validi."); return; }
+    setBusy(true);
+    try{ await POST("pagamenti",{user_id:utente.id,cond_id:utente.cond_id,data_pagamento:nuovo.data,importo:imp,nominativo:utente.name,origine:"manuale"},tok); setNuovo({data:oggiISO(),importo:""}); await load(); }catch(e){alert(e.message);}
+    setBusy(false);
+  };
+  const elimina=async id=>{ if(!window.confirm("Eliminare questo versamento?")) return; setBusy(true); try{ await DEL("pagamenti","id=eq."+id,tok); await load(); }catch(e){alert(e.message);} setBusy(false); };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{maxHeight:"88vh"}} onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div><h3 className="font-bold text-gray-800">Rate e pagamenti</h3><p className="text-xs text-gray-400">{utente.name} · {utente.condominii?.nome} · Int.{utente.interno||"—"}</p></div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 text-xl">×</button>
+        </div>
+        <div className="px-6 py-5 overflow-y-auto">
+          <ErrBox msg={err}/>
+          {!dati?<Spinner/>:(
+            <>
+              <div className="grid grid-cols-3 gap-3 mb-5 text-center">
+                <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Dovuto</p><p className="font-bold text-gray-800">{fmtEur(totDovuto)}</p></div>
+                <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Versato</p><p className="font-bold text-gray-800">{fmtEur(totVersato)}</p></div>
+                <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Eccedenza non attribuita</p><p className="font-bold text-gray-800">{fmtEur(credito)}</p></div>
+              </div>
+              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Rate</p>
+              {!rate.length?<p className="text-sm text-gray-400 mb-5">Nessuna rata configurata per questo condominio.</p>:(
+                <div className="space-y-2 mb-5">
+                  {rate.map(r=>{const st=stati[r.key]; return (
+                    <div key={r.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-4 py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-700">Rata {r.numero_rata}{r.descrizione?" · "+r.descrizione:""}</p>
+                        <p className="text-xs text-gray-400">Scad. {fmtData(r.data_scadenza)} · {r.importo!=null?fmtEur(r.importo):"importo non definito"}{st&&st.stato==="parziale"?" · versati "+fmtEur(st.versato):""}{st&&st.stato==="pagata"&&st.data?" · il "+fmtData(st.data):""}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <StatoRataBadge st={st} scadenza={r.data_scadenza}/>
+                        {r.rcId?(
+                          <select value={r.stato_manuale||""} disabled={busy} onChange={e=>forza(r.rcId,e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-white">
+                            <option value="">Automatico</option><option value="pagata">Forza: pagata</option><option value="da_pagare">Forza: da pagare</option>
+                          </select>
+                        ):null}
+                      </div>
+                    </div>
+                  );})}
+                </div>
+              )}
+              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Versamenti</p>
+              <div className="flex gap-2 mb-3">
+                <input type="date" value={nuovo.data} onChange={e=>setNuovo(n=>({...n,data:e.target.value}))} className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
+                <input type="text" inputMode="decimal" placeholder="Importo" value={nuovo.importo} onChange={e=>setNuovo(n=>({...n,importo:e.target.value}))} className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 w-32"/>
+                <Btn onClick={aggiungi} disabled={busy}>+ Aggiungi</Btn>
+              </div>
+              {!dati.pg.length?<p className="text-sm text-gray-400">Nessun versamento registrato.</p>:(
+                <div className="space-y-1">
+                  {dati.pg.map(p=>(
+                    <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2 text-sm">
+                      <span className="text-gray-600">{fmtData(p.data_pagamento)} · <span className="text-xs text-gray-400">{p.origine==="import_pdf"?"da PDF":"manuale"}</span></span>
+                      <span className="flex items-center gap-3"><strong className="text-gray-800">{fmtEur(p.importo)}</strong><button onClick={()=>elimina(p.id)} disabled={busy} className="text-xs text-red-500 hover:underline">Elimina</button></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-4">I versamenti coprono le rate dalla più vecchia alla più recente. Le rate forzate a mano restano fuori dal calcolo automatico.</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel({user,onLogout,view,setView}) {
   const nav=[
     {id:"condominii",  label:"Condomìni",      icon:"🏢"},
     {id:"utenti",      label:"Utenti",          icon:"👥"},
     {id:"importa",     label:"Importa Excel",   icon:"📥"},
     {id:"rate",        label:"Rate",             icon:"📅"},
+    {id:"pagamenti",   label:"Registra Pagamenti", icon:"💶"},
     {id:"documenti",   label:"Documenti",        icon:"📁"},
     {id:"generali",    label:"Doc. Generali",    icon:"📋"},
     {id:"scadenze",    label:"Rate in Scadenza", icon:"⏰"},
@@ -500,6 +871,7 @@ function AdminPanel({user,onLogout,view,setView}) {
           {view==="utenti"       && <AdminUtenti tok={user.token}/>}
           {view==="importa"      && <AdminImport tok={user.token}/>}
           {view==="rate"         && <AdminRate tok={user.token}/>}
+          {view==="pagamenti"    && <AdminPagamenti tok={user.token}/>}
           {view==="documenti"    && <AdminDocumenti tok={user.token}/>}
           {view==="generali"     && <AdminGeneralDocs tok={user.token}/>}
           {view==="scadenze"     && <AdminScadenze tok={user.token}/>}
@@ -774,6 +1146,25 @@ function AdminUtenti({tok}) {
   },[tok,search,filterCond,filtroRuolo,page]);
   useEffect(()=>{load();},[load]);
   useEffect(()=>setPage(0),[search,filterCond,filtroRuolo]);
+  const [riepRate,setRiepRate]=useState({}); const [rateModal,setRateModal]=useState(null);
+  useEffect(()=>{ (async()=>{
+    if(!users.length){ setRiepRate({}); return; }
+    try{
+      const condIds=[...new Set(users.map(u=>u.cond_id).filter(Boolean))];
+      const uids=users.map(u=>u.id).join(",");
+      const rd=condIds.length?await GET("rate_condominio","cond_id=in.("+condIds.join(",")+")&select=id,cond_id,data_scadenza",tok)||[]:[];
+      const ri=rd.length?await GET("rate_condomino","user_id=in.("+uids+")&select=rata_id,user_id,importo,stato_manuale",tok)||[]:[];
+      const pg=await GET("pagamenti","user_id=in.("+uids+")&select=user_id,importo,data_pagamento",tok)||[];
+      const oggi=oggiISO(); const out={};
+      for(const u of users){
+        const lista=rd.filter(r=>r.cond_id===u.cond_id).map(r=>{const i=ri.find(x=>x.rata_id===r.id&&x.user_id===u.id); return {key:r.id,data_scadenza:r.data_scadenza,importo:i?.importo,stato_manuale:i?.stato_manuale};}).filter(r=>r.stato_manuale||Number(r.importo)>0);
+        if(!lista.length) continue;
+        const {stati}=calcolaStatoRate(lista,pg.filter(p=>p.user_id===u.id));
+        out[u.id]={tot:lista.length,pagate:lista.filter(r=>stati[r.key]?.stato==="pagata").length,scadute:lista.filter(r=>String(r.data_scadenza)<oggi&&stati[r.key]?.stato!=="pagata").length};
+      }
+      setRiepRate(out);
+    }catch(e){ console.warn("Riepilogo rate:",e.message); }
+  })(); },[users,tok]);
   const save=async f=>{
     try{
       if(modal.mode==="add"){
@@ -846,11 +1237,12 @@ function AdminUtenti({tok}) {
             <div className="flex items-center gap-3">
               <div className={"w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm "+(u.role==="inquilino"?"bg-blue-100 text-blue-600":"bg-emerald-100 text-emerald-600")}>{u.name?.charAt(0)}</div>
               <div>
-                <div className="flex items-center gap-2"><p className="font-semibold text-gray-800 text-sm">{u.name}</p><StatoUtente s={u.stato}/></div>
+                <div className="flex items-center gap-2"><p className="font-semibold text-gray-800 text-sm">{u.name}</p><StatoUtente s={u.stato}/><RiepRateBadge r={riepRate[u.id]}/></div>
                 <p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p>
               </div>
             </div>
             <div className="flex gap-2">
+              <Btn variant="secondary" onClick={()=>setRateModal(u)}>💶 Rate</Btn>
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
               {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeExCondomino(u.id)}>Ex-Condomino</Btn>}
               {(u.stato==="ex_condomino"||u.stato==="disattivato")&&<Btn variant="success" onClick={()=>reattiva(u.id)}>Riattiva</Btn>}
@@ -867,6 +1259,7 @@ function AdminUtenti({tok}) {
         </div>
       </div>
       {modal&&<UtenteModal mode={modal.mode} data={modal.data} condominii={condominii||[]} onSave={save} onClose={()=>setModal(null)}/>}
+      {rateModal&&<RatePagamentiModal utente={rateModal} tok={tok} onClose={()=>{setRateModal(null); load();}}/>}
     </div>
   );
 }
@@ -2359,9 +2752,21 @@ function CondRate({user}) {
 
         // 3. Carica importi per tutte le unità
         const ids=rateDef.map(r=>r.id).join(",");
-        const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,rata_id,user_id&rata_id=in.("+ids+")&user_id=in.("+userIds+")",
+        const r2=await fetch(SBU+"/rest/v1/rate_condomino?select=id,importo,notificato,rata_id,user_id,stato_manuale&rata_id=in.("+ids+")&user_id=in.("+userIds+")",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
         const importi=await r2.json()||[];
+        // 3b. Versamenti registrati e stato di ogni rata
+        let pagam=[];
+        try{
+          const r3=await fetch(SBU+"/rest/v1/pagamenti?select=user_id,importo,data_pagamento&user_id=in.("+userIds+")",
+            {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
+          const j=await r3.json(); if(Array.isArray(j)) pagam=j;
+        }catch(e){}
+        const statiPerProf={};
+        for(const prof of sameProfiles){
+          const lista=rateDef.map(rata=>{const imp=Array.isArray(importi)?importi.find(i=>i.rata_id===rata.id&&i.user_id===prof.id):null; return {key:rata.id,data_scadenza:rata.data_scadenza,importo:imp?.importo,stato_manuale:imp?.stato_manuale};});
+          statiPerProf[prof.id]=calcolaStatoRate(lista,pagam.filter(p=>p.user_id===prof.id)).stati;
+        }
 
         // 4. Costruisci lista: una riga per ogni coppia (unità, rata)
         const result=[];
@@ -2377,6 +2782,7 @@ function CondRate({user}) {
               name:prof.name||user.name,
               importo:imp?.importo||null,
               notificato:imp?.notificato||false,
+              stato:statiPerProf[prof.id]?.[rata.id]||null,
             });
           }
         }
@@ -2405,8 +2811,10 @@ function CondRate({user}) {
       :(
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {(multiUnita?rate:righe).map((r,i,arr)=>{
-            const scaduta=isScaduta(r.data_scadenza);
-            const inScadenza=isInScadenza(r.data_scadenza);
+            const _imps=multiUnita?righe.filter(x=>x.rata_id===r.rata_id):[r];
+            const _pagato=_imps.some(x=>x.stato?.stato==="pagata")&&_imps.every(x=>x.stato&&(x.stato.stato==="pagata"||x.stato.stato==="nd"));
+            const scaduta=isScaduta(r.data_scadenza)&&!_pagato;
+            const inScadenza=isInScadenza(r.data_scadenza)&&!_pagato;
             const g=diffGiorni(r.data_scadenza);
             // Importi per questa rata (tutte le unità se multi)
             const impPerRata=multiUnita?righe.filter(x=>x.rata_id===r.rata_id):null;
@@ -2414,7 +2822,7 @@ function CondRate({user}) {
               <div key={r.rata_id+r.interno} className={"p-5 "+(i<arr.length-1?"border-b border-gray-50":"")}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className={"w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg "+(scaduta?"bg-red-100 text-red-600":inScadenza?"bg-amber-100 text-amber-600":"bg-blue-50 text-blue-600")}>
+                    <div className={"w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg "+(_pagato?"bg-emerald-100 text-emerald-600":scaduta?"bg-red-100 text-red-600":inScadenza?"bg-amber-100 text-amber-600":"bg-blue-50 text-blue-600")}>
                       {r.numero_rata}
                     </div>
                     <div>
@@ -2428,6 +2836,7 @@ function CondRate({user}) {
                     <div className="text-right">
                       {r.importo!=null?<p className="text-xl font-black text-gray-800">EUR {Number(r.importo).toFixed(2)}</p>:<p className="text-sm text-gray-400 italic">Da definire</p>}
                       {r.notificato&&<p className="text-xs text-emerald-600 font-semibold mt-0.5">✓ Promemoria inviato</p>}
+                      <StatoRataCond st={r.stato} scadenza={r.data_scadenza}/>
                     </div>
                   )}
                 </div>
@@ -2439,6 +2848,7 @@ function CondRate({user}) {
                         <div className="text-right">
                           {imp.importo!=null?<span className="font-bold text-gray-800">EUR {Number(imp.importo).toFixed(2)}</span>:<span className="text-xs text-gray-400 italic">Da definire</span>}
                           {imp.notificato&&<span className="text-xs text-emerald-600 ml-2">✓</span>}
+                          <StatoRataCond st={imp.stato} scadenza={imp.data_scadenza}/>
                         </div>
                       </div>
                     ))}
