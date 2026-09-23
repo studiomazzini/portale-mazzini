@@ -482,6 +482,7 @@ function DocModal({onSave,onClose,bucket,pathPrefix,tok}) {
 const normNome = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
 const tokNome = s => normNome(s).split(" ").filter(t=>t.length>1);
 const normCod = s => String(s??"").trim().replace(/^0+(?=\d)/,"");
+const normInt = s => String(s??"").toUpperCase().replace(/\s+/g,"").replace(/^0+(?=\d)/,"").trim();
 const fmtEur = n => "EUR "+Number(n||0).toFixed(2);
 const fmtData = d => d?new Date(d).toLocaleDateString("it-IT"):"";
 const oggiISO = () => new Date().toISOString().slice(0,10);
@@ -539,61 +540,59 @@ const RiepRateBadge = ({r}) => {
   return <span className={"text-xs px-2 py-0.5 rounded-full font-medium "+cls}>{txt}</span>;
 };
 
-// Legge la stampa "Registrazioni del Giorno" del gestionale (PDF testuale).
-// Lavora per colonne: ogni riga è ancorata a stabile + data; i pezzi del nominativo
-// (anche su due linee, centrati in verticale) vanno alla riga più vicina.
+// Legge la stampa "Elenco versamenti dello Stabile" del gestionale (PDF testuale).
+// Tabella a colonne: Prog. | Unità | Condomino | Rata | Importo | Data Vers.
+// Un file può contenere più stabili (più sezioni "Stabile: ... (codice)").
 async function leggiPdfVersamenti(file){
   const V="4.4.168";
   const pdfjs=await import(/* @vite-ignore */ "https://cdn.jsdelivr.net/npm/pdfjs-dist@"+V+"/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@"+V+"/build/pdf.worker.min.mjs";
   const pdf=await pdfjs.getDocument({data:await file.arrayBuffer()}).promise;
-  const RE_DATA=/^(\d{2})\/(\d{2})\/(\d{4})$/, RE_COD=/^\d{1,4}$/;
-  const RE_IMP=/^-?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+\.\d{2})$/;
-  const parseImp=s=>s.includes(",")?parseFloat(s.replace(/\./g,"").replace(",",".")):parseFloat(s);
-  const rows=[]; let altriTipi=0; let scartati=0;
+  const RE_DATA=/^(\d{2})\/(\d{2})\/(\d{4})$/;
+  const RE_IMP=/^-?\d{1,3}(?:\.\d{3})*,\d{2}$/;
+  const parseImp=s=>parseFloat(String(s).replace(/\./g,"").replace(",","."));
+  const col=x=> x<245?"prog": x<275?"unita": x<448?"nome": x<498?"rata": x<552?"imp":"data";
+  const stripPref=s=>String(s||"").replace(/^\s*\d+\s*-\s*/,"").trim();
+  const rows=[]; let scartati=0; let totDich=0;
   for(let p=1;p<=pdf.numPages;p++){
     const tc=await (await pdf.getPage(p)).getTextContent();
-    const items=tc.items.filter(it=>it.str&&it.str.trim()).map(it=>({s:it.str.trim(),x:it.transform[4],y:it.transform[5],usato:false}));
-    const stessaY=(a,b)=>Math.abs(a.y-b.y)<=2;
-    const ancore=[];
-    for(const d of items){
-      const md=d.s.match(RE_DATA); if(!md) continue;
-      const cod=items.filter(i=>i!==d&&stessaY(i,d)&&i.x<d.x&&RE_COD.test(i.s)).sort((a,b)=>b.x-a.x)[0];
-      if(!cod) continue;
-      const tipo=items.filter(i=>stessaY(i,d)&&i.x>d.x).sort((a,b)=>a.x-b.x)[0];
-      if(!tipo) continue;
-      const imp=items.filter(i=>stessaY(i,d)&&i.x>tipo.x&&RE_IMP.test(i.s)).sort((a,b)=>b.x-a.x)[0];
-      [d,cod,tipo,imp].forEach(i=>{ if(i) i.usato=true; });
-      ancore.push({y:d.y,xTipo:tipo.x,tipo:tipo.s,codice:normCod(cod.s),data:md[3]+"-"+md[2]+"-"+md[1],importo:imp?parseImp(imp.s):null,pezzi:[]});
-    }
-    if(!ancore.length) continue;
-    const xNome=Math.min(...ancore.map(a=>a.xTipo))+5;
-    const yMax=Math.max(...ancore.map(a=>a.y))+9, yMin=Math.min(...ancore.map(a=>a.y))-9;
-    for(const it of items){
-      if(it.usato||it.x<xNome||it.y>yMax||it.y<yMin) continue;
-      const vicina=ancore.reduce((b,a)=>Math.abs(a.y-it.y)<Math.abs(b.y-it.y)?a:b);
-      if(Math.abs(vicina.y-it.y)<9) vicina.pezzi.push(it);
-    }
-    for(const a of ancore.sort((x,y)=>y.y-x.y)){
-      if(!/^vers/i.test(a.tipo)){ altriTipi++; continue; }
-      const linee=[];
-      for(const pz of a.pezzi.sort((x,y)=>y.y-x.y||x.x-y.x)){
-        const l=linee.find(l=>Math.abs(l.y-pz.y)<=2);
-        if(l) l.t.push(pz.s); else linee.push({y:pz.y,t:[pz.s]});
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({s:i.str.trim(),x:i.transform[4],y:i.transform[5]}));
+    items.sort((a,b)=>b.y-a.y||a.x-b.x);
+    const linee=[]; let cur=null;
+    for(const it of items){ if(cur&&Math.abs(cur.y-it.y)<=2)cur.p.push(it); else{ if(cur)linee.push(cur); cur={y:it.y,p:[it]}; } }
+    if(cur)linee.push(cur);
+    let cod=null, pend=null;
+    const chiudi=()=>{ if(pend){ if(pend.importo>0&&pend.nome) rows.push(pend); else scartati++; pend=null; } };
+    for(const l of linee){
+      const testo=l.p.map(z=>z.s).join(" ").replace(/\s+/g," ").trim();
+      const mStab=testo.match(/Stabile[:\s]+.*?\((\d{1,4})\)/i)||testo.match(/Elenco versamenti dello Stabile\s+(\d{1,4})/i);
+      if(mStab){ chiudi(); cod=normCod(mStab[1]); continue; }
+      const mt=testo.match(/Totale\s*=\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})/i);
+      if(mt){ chiudi(); totDich+=parseImp(mt[1]); continue; }
+      const cells={};
+      for(const z of l.p){ const c=col(z.x); cells[c]=(cells[c]?cells[c]+" ":"")+z.s; }
+      if((cells.unita||"").trim()==="Unità"||(cells.data||"").trim()==="Data Vers."||(cells.prog||"").trim()==="Prog.") continue;
+      const dOk=cells.data&&RE_DATA.test(cells.data.trim());
+      const iOk=cells.imp&&RE_IMP.test(cells.imp.trim());
+      if(cod&&dOk&&iOk){
+        chiudi();
+        const md=cells.data.trim().match(RE_DATA);
+        pend={codice:cod,unita:(cells.unita||"").trim(),nome:stripPref(cells.nome),
+          rata:(cells.rata||"").trim(),importo:parseImp(cells.imp.trim()),
+          data:md[3]+"-"+md[2]+"-"+md[1]};
+      } else if(pend&&cells.nome&&!dOk&&!iOk&&!cells.unita){
+        pend.nome=(pend.nome+" "+stripPref(cells.nome)).trim();
       }
-      const nome=linee.map(l=>l.t.join(" ")).join(" - ").replace(/\s+/g," ").trim();
-      if(!(a.importo>0)||!nome){ scartati++; continue; }
-      rows.push({codice:a.codice,data:a.data,nome,importo:a.importo});
     }
+    chiudi();
   }
-  // impronta anti-doppione (le righe identiche nello stesso file restano distinte)
   const visti={};
   for(const r of rows){
-    const base=r.codice+"|"+r.data+"|"+normNome(r.nome)+"|"+r.importo.toFixed(2);
-    visti[base]=(visti[base]||0)+1;
-    r.chiave=base+"|"+visti[base];
+    const base=r.codice+"|"+r.unita+"|"+r.data+"|"+r.rata+"|"+r.importo.toFixed(2)+"|"+normNome(r.nome);
+    visti[base]=(visti[base]||0)+1; r.chiave=base+"|"+visti[base];
   }
-  return {rows,altriTipi,scartati};
+  const totLetto=Math.round(rows.reduce((s,r)=>s+r.importo,0)*100)/100;
+  return {rows,totaleDichiarato:Math.round(totDich*100)/100,totaleLetto:totLetto,scartati,altriTipi:0};
 }
 
 // ── Admin: registrazione pagamenti da PDF ────────────────────────────────────
@@ -606,52 +605,32 @@ function AdminPagamenti({tok}) {
     if(!file) return;
     setErr(""); setEsito(null); setRighe([]); setInfo(null); setLoading(true);
     try{
-      const {rows,altriTipi,scartati}=await leggiPdfVersamenti(file);
-      if(!rows.length) throw new Error("Nessun versamento trovato nel PDF. Verifica che sia la stampa \"Registrazioni del Giorno\" del gestionale.");
+      const {rows,totaleDichiarato,totaleLetto,scartati}=await leggiPdfVersamenti(file);
+      if(!rows.length) throw new Error("Nessun versamento trovato. Verifica che sia la stampa \"Elenco versamenti dello Stabile\" del gestionale.");
       const conds=await GET("condominii","select=id,nome,codice",tok)||[];
       const perCod={}; conds.forEach(c=>{ if(c.codice!=null&&String(c.codice).trim()!=="") perCod[normCod(c.codice)]=c; });
       const condIds=[...new Set(rows.map(r=>perCod[r.codice]?.id).filter(Boolean))];
       const ppc={};
       for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,interno,cond_id,role&order=name",tok)||[];
 
-      // 1) abbinamento per nominativo
+      // Abbinamento: stabile (dal codice) + Unità (interno). Nome solo come ripiego/spareggio.
       const out=rows.map(r=>{
         const c=perCod[r.codice];
-        const base={...r,condId:c?.id||null,condNome:c?.nome||"",userId:"",esito:"nocond",cands:[]};
+        const base={...r,condId:c?.id||null,condNome:c?.nome||"",userId:"",esito:"nocond"};
         if(!c) return base;
-        const lista=ppc[c.id]||[]; const n=normNome(r.nome); const tt=tokNome(r.nome);
-        let cands=lista.filter(p=>normNome(p.name)===n);
-        if(!cands.length&&tt.length) cands=lista.filter(p=>{const pt=tokNome(p.name); return pt.length&&(tt.every(t=>pt.includes(t))||pt.every(t=>tt.includes(t)));});
-        const prop=cands.filter(p=>p.role!=="inquilino"); if(prop.length) cands=prop;
-        if(cands.length===1) return {...base,userId:cands[0].id,esito:"ok",cands};
-        if(cands.length>1) return {...base,esito:"multi",cands};
+        const lista=ppc[c.id]||[]; const ui=normInt(r.unita);
+        const n=normNome(r.nome), tt=tokNome(r.nome);
+        const perNome=arr=>{ let b=arr.filter(p=>normNome(p.name)===n); if(!b.length&&tt.length) b=arr.filter(p=>{const pt=tokNome(p.name); return pt.length&&(tt.every(t=>pt.includes(t))||pt.every(t=>tt.includes(t)));}); return b; };
+        let cands = ui ? lista.filter(p=>normInt(p.interno)===ui) : [];
+        let via = cands.length?"interno":"";
+        if(cands.length>1){ const bn=perNome(cands); if(bn.length) cands=bn; const prop=cands.filter(p=>p.role!=="inquilino"); if(prop.length) cands=prop; }
+        if(!cands.length){ cands=perNome(lista); via=cands.length?"nome":""; const prop=cands.filter(p=>p.role!=="inquilino"); if(prop.length&&cands.length>1) cands=prop; }
+        if(cands.length===1) return {...base,userId:cands[0].id,esito:via==="nome"?"nome":"ok"};
+        if(cands.length>1)  return {...base,esito:"multi"};
         return {...base,esito:"nomatch"};
       });
 
-      // 2) più unità con lo stesso nome: scelgo quella con la prima rata aperta pari all'importo
-      const ambigui=out.filter(r=>r.esito==="multi");
-      if(ambigui.length){
-        const ids=[...new Set(ambigui.flatMap(r=>r.cands.map(p=>p.id)))];
-        const ri=await GET("rate_condomino","user_id=in.("+ids.join(",")+")&select=rata_id,user_id,importo,stato_manuale",tok)||[];
-        const rataIds=[...new Set(ri.map(x=>x.rata_id))];
-        const rd=rataIds.length?await GET("rate_condominio","id=in.("+rataIds.join(",")+")&select=id,data_scadenza",tok)||[]:[];
-        const pg=await GET("pagamenti","user_id=in.("+ids.join(",")+")&select=user_id,importo,data_pagamento",tok)||[];
-        const virtuali={};
-        const primaAperta=uid=>{
-          const lista=ri.filter(x=>x.user_id===uid).map(x=>({key:x.rata_id,importo:x.importo,stato_manuale:x.stato_manuale,data_scadenza:rd.find(d=>d.id===x.rata_id)?.data_scadenza||""}));
-          const {stati}=calcolaStatoRate(lista,[...pg.filter(p=>p.user_id===uid),...(virtuali[uid]||[])]);
-          const aperta=[...lista].sort((a,b)=>String(a.data_scadenza).localeCompare(String(b.data_scadenza))).find(x=>["da_pagare","parziale"].includes(stati[x.key]?.stato));
-          return aperta?Math.round((stati[aperta.key].dovuto-stati[aperta.key].versato)*100)/100:null;
-        };
-        for(const r of ambigui){
-          const ok=r.cands.filter(p=>{const res=primaAperta(p.id); return res!=null&&Math.abs(res-r.importo)<0.01;});
-          const scelto=ok[0]||r.cands[0];
-          r.userId=scelto.id; r.esito=ok.length===1?"importo":"verifica";
-          (virtuali[scelto.id]=virtuali[scelto.id]||[]).push({user_id:scelto.id,importo:r.importo,data_pagamento:r.data});
-        }
-      }
-
-      // 3) versamenti già registrati in precedenza
+      // Versamenti già registrati (stesso file già importato in precedenza)
       try{
         const lista=out.map(r=>"\""+r.chiave.replace(/"/g,"")+"\"").join(",");
         const gia=await GET("pagamenti","chiave_import=in.("+encodeURIComponent(lista)+")&select=chiave_import",tok)||[];
@@ -659,7 +638,8 @@ function AdminPagamenti({tok}) {
         out.forEach(r=>{ if(set.has(r.chiave)){ r.esito="gia"; r.userId=""; } });
       }catch(e){ console.warn("Controllo doppioni:",e.message); }
 
-      setProfPerCond(ppc); setRighe(out); setInfo({altriTipi,scartati});
+      setProfPerCond(ppc); setRighe(out);
+      setInfo({totaleDichiarato,totaleLetto,scartati});
     }catch(e){ setErr(e.message); }
     setLoading(false);
   };
@@ -681,9 +661,9 @@ function AdminPagamenti({tok}) {
   };
 
   const ESITI={
-    ok:["Abbinato","bg-emerald-100 text-emerald-700"],
-    importo:["Abbinato per importo","bg-emerald-50 text-emerald-600"],
-    verifica:["Da verificare","bg-amber-100 text-amber-700"],
+    ok:["Abbinato (unità)","bg-emerald-100 text-emerald-700"],
+    nome:["Abbinato (nome)","bg-emerald-50 text-emerald-600"],
+    multi:["Più profili: scegli","bg-amber-100 text-amber-700"],
     nomatch:["Non abbinato","bg-red-100 text-red-600"],
     nocond:["Stabile non nel portale","bg-gray-100 text-gray-500"],
     gia:["Già registrato","bg-slate-100 text-slate-500"],
@@ -691,11 +671,12 @@ function AdminPagamenti({tok}) {
   const conta=k=>righe.filter(r=>r.esito===k).length;
   const daRegistrare=righe.filter(r=>r.userId&&r.condId&&r.esito!=="gia");
   const totale=daRegistrare.reduce((s,r)=>s+r.importo,0);
+  const totDiff=info&&Math.abs(info.totaleDichiarato-info.totaleLetto)>0.01;
 
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-2">Registra Pagamenti</h2>
-      <p className="text-gray-400 text-sm mb-5">Carica la stampa "Registrazioni del Giorno" del gestionale (PDF). I versamenti vengono abbinati per stabile e nominativo; controlla l'anteprima prima di confermare.</p>
+      <p className="text-gray-400 text-sm mb-5">Carica la stampa "Elenco versamenti dello Stabile" del gestionale (PDF). I versamenti vengono abbinati per stabile e numero di unità; controlla l'anteprima prima di confermare.</p>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-4">
         <input type="file" accept="application/pdf,.pdf" disabled={loading||saving}
           onChange={e=>{carica(e.target.files?.[0]); e.target.value="";}}
@@ -712,22 +693,30 @@ function AdminPagamenti({tok}) {
       )}
       {!loading&&righe.length>0&&(
         <>
+          {info&&(
+            <div className={"text-sm rounded-xl px-4 py-2 mb-3 border "+(totDiff?"bg-amber-50 border-amber-200 text-amber-700":"bg-slate-50 border-slate-200 text-slate-600")}>
+              Totale dichiarato dal PDF: <strong>{fmtEur(info.totaleDichiarato)}</strong> · letto: <strong>{fmtEur(info.totaleLetto)}</strong>
+              {totDiff?" — non coincidono, verifica che tutte le righe siano state lette.":" — coincidono."}
+              {info.scartati>0&&<> ({info.scartati} righe ignorate)</>}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 mb-3 text-xs">
             {Object.keys(ESITI).map(k=>conta(k)>0&&<span key={k} className={"px-2 py-1 rounded-full font-medium "+ESITI[k][1]}>{ESITI[k][0]}: {conta(k)}</span>)}
-            {info?.altriTipi>0&&<span className="px-2 py-1 rounded-full bg-gray-50 text-gray-400">Altre registrazioni ignorate: {info.altriTipi}</span>}
           </div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-                <th className="p-3">Stabile</th><th className="p-3">Data</th><th className="p-3">Nominativo (PDF)</th><th className="p-3 text-right">Importo</th><th className="p-3">Condòmino</th><th className="p-3">Esito</th>
+                <th className="p-3">Stabile</th><th className="p-3">Unità</th><th className="p-3">Nominativo (PDF)</th><th className="p-3">Rata</th><th className="p-3 text-right">Importo</th><th className="p-3">Data</th><th className="p-3">Condòmino</th><th className="p-3">Esito</th>
               </tr></thead>
               <tbody>
                 {righe.map((r,i)=>(
                   <tr key={r.chiave} className="border-b border-gray-50 align-top">
                     <td className="p-3"><p className="font-semibold text-gray-700">{r.codice}</p><p className="text-xs text-gray-400">{r.condNome||"—"}</p></td>
-                    <td className="p-3 whitespace-nowrap text-gray-600">{fmtData(r.data)}</td>
+                    <td className="p-3 text-gray-700">{r.unita||"—"}</td>
                     <td className="p-3 text-gray-700">{r.nome}</td>
+                    <td className="p-3 text-gray-600">{r.rata||"—"}</td>
                     <td className="p-3 text-right font-semibold text-gray-800 whitespace-nowrap">{fmtEur(r.importo)}</td>
+                    <td className="p-3 whitespace-nowrap text-gray-600">{fmtData(r.data)}</td>
                     <td className="p-3">
                       {r.condId&&r.esito!=="gia"?(
                         <select value={r.userId} onChange={e=>setUser(i,e.target.value)}
