@@ -841,7 +841,7 @@ function AdminPanel({user,onLogout,view,setView}) {
   const nav=[
     {id:"condominii",  label:"Condomìni",      icon:"🏢"},
     {id:"utenti",      label:"Utenti",          icon:"👥"},
-    {id:"importa",     label:"Importa Excel",   icon:"📥"},
+    {id:"importa",     label:"Import Proprietari",   icon:"📥"},
     {id:"rate",        label:"Rate",             icon:"📅"},
     {id:"pagamenti",   label:"Registra Pagamenti", icon:"💶"},
     {id:"documenti",   label:"Documenti",        icon:"📁"},
@@ -1255,156 +1255,157 @@ function AdminUtenti({tok}) {
 
 // ── Admin Importa Excel ───────────────────────────────────────────────────────
 function AdminImport({tok}) {
-  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
-  const [selCond,setSelCond]=useState(""); const [rows,setRows]=useState([]);
-  const [preview,setPreview]=useState(false); const [importing,setImporting]=useState(false);
-  const [progress,setProgress]=useState(0); const [results,setResults]=useState(null); const [err,setErr]=useState("");
+  // ── Import Proprietari v2 — formato "Elenco anagrafiche" con Cod. Anag. ──────
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const [selCond,setSelCond]=useState("");
+  const [rows,setRows]=useState([]); const [preview,setPreview]=useState(false);
+  const [importing,setImporting]=useState(false); const [progress,setProgress]=useState(0);
+  const [results,setResults]=useState(null); const [err,setErr]=useState("");
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+
+  const normInt = s => String(s??"").toUpperCase().replace(/\s+/g,"").replace(/^0+(?=\d)/,"").trim();
 
   const parseExcel=async xfile=>{
     setErr(""); setRows([]); setPreview(false); setResults(null);
     try{
       const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
-      const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
-      const data=XLSX.utils.sheet_to_json(ws,{defval:""});
-      const g=(row,names)=>{ for(const n of names){ const v=row[n]; if(v!==undefined&&String(v).trim()!=="") return String(v).trim(); } return ""; };
-      const parsed=[]; const mapByNUn={};
-      for(const r of data){
-        const tipo=g(r,["Tipo Cond.","TIPO COND.","Tipo cond."]).toLowerCase().trim();
-        if(!tipo) continue;
-        if(tipo.startsWith("ex")||tipo.includes("ex.")||tipo.includes("ex ")) continue;
-        const nomeCompleto=g(r,["Nome","NOME"]).trim();
-        if(!nomeCompleto) continue;
-        const nUn=g(r,["N. Un.","N.Un.","N Un","N.Un","Unita","Unita"]);
-        const primoToken=nomeCompleto.split(/\s+/)[0]||"Utente";
-        const token=primoToken.charAt(0).toUpperCase()+primoToken.slice(1,4).toLowerCase();
-        const mese=String(new Date().getMonth()+1).padStart(2,"0");
-        const persona={
-          nomeCompleto, tipo, nUn,
-          isProprietario: tipo.includes("proprietario"),
-          isInquilino:    tipo.includes("inquilino"),
-          presso:    g(r,["Presso","PRESSO","C/O"]),
-          via:       g(r,["Via","VIA"]),
-          cap:       g(r,["CAP","Cap"]),
-          localita:  g(r,["Localita","Localita","Citta","Citta"]),
-          prov:      g(r,["Prov.","PROV","Prov"]),
-          percPoss:  g(r,["% Poss.","% Poss","Poss.","POSS"]),
-          percRate:  g(r,["% Rate","% rate","Rate","RATE"]),
-          percDetraz:g(r,["% Detraz","% Detraz.","Detraz","DETRAZ"]),
-          cf:        g(r,["Codice Fiscale","CF","CODICE FISCALE"]),
-          dataNasc:  g(r,["Data Nascita","DATA NASCITA","Data nasc."]),
-          telefono:  g(r,["Telefono","TEL","Tel","Tel 1","Tel."]),
-          tel2:      g(r,["Tel 2","Tel2","TEL2","Telefono 2"]),
-          cell:      g(r,["Cellulare","Cell","CELL","Cell 1","Cell."]),
-          cell2:     g(r,["Cell 2","Cell2","CELL2","Cellulare 2"]),
-          fax:       g(r,["Fax","FAX"]),
-          email:     g(r,["Email","EMAIL","E-mail","email 1","Email 1"]),
-          email2:    g(r,["Email 2","EMAIL 2","E-mail 2","email 2"]),
-          password:  token+mese+"!",
-          inquilini: []
-        };
-        if(persona.isProprietario){
-          if(nUn && mapByNUn[nUn]){
-            // Stessa N. Un. → secondo proprietario: metti il nome in "presso"
-            const existing=mapByNUn[nUn];
-            existing.presso=existing.presso
-              ? existing.presso+" / "+persona.nomeCompleto
-              : persona.nomeCompleto;
-          } else {
-            parsed.push(persona);
-            if(nUn) mapByNUn[nUn]=persona;
-          }
-        } else if(persona.isInquilino){
-          // Crea profilo portale per l'inquilino
-          const inqParsed={...persona, role:"inquilino", interno:nUn?String(nUn):"", nomeCompleto:persona.nomeCompleto, inquilini:[]};
-          parsed.push(inqParsed);
-          // Collega anche all'anagrafica del proprietario
-          const inqData={nome:persona.nomeCompleto,email:persona.email,tel:persona.telefono,email2:persona.email2};
-          const propr=nUn?mapByNUn[nUn]:null;
-          if(propr) propr.inquilini.push(inqData);
-          else if(parsed.length>1) parsed[parsed.length-2].inquilini.push(inqData);
-        }
+      const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf,{cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false});
+      const norm=s=>String(s||"").toLowerCase().replace(/\./g,"").replace(/\s+/g," ").trim();
+      // Trova la riga di intestazione (ci sono righe di testata sopra)
+      let hi=-1;
+      for(let i=0;i<aoa.length;i++){
+        const cells=aoa[i].map(norm);
+        const hasUnit=cells.some(c=>c==="unita"||c==="unit"||c.startsWith("unit"));
+        if(hasUnit && (cells.some(c=>c.includes("cod anag"))||cells.some(c=>c==="cognome"))){ hi=i; break; }
       }
-      if(!parsed.length){ setErr("Nessun proprietario trovato. Verifica che la colonna 'Tipo Cond.' contenga 'Proprietario'."); return; }
+      if(hi<0){ setErr("Intestazione non trovata. Il file deve contenere una riga con 'Unità' e 'Cod. Anag.' (o 'Cognome')."); return; }
+      const header=aoa[hi].map(norm);
+      const col=(...names)=>{ for(const n of names){ let idx=header.findIndex(h=>h===n); if(idx>=0) return idx; idx=header.findIndex(h=>h.includes(n)); if(idx>=0) return idx; } return -1; };
+      const ci={
+        unita:col("unita","unit"), cod:col("cod anag","codice anag","cod anagrafica"),
+        cognome:col("cognome"), nome:col("nome"), presso:col("presso","c/o"),
+        via:col("via"), cap:col("cap"), citta:col("citta","localita"), prov:col("prov"),
+        cf:col("cod fiscale","codice fiscale"),
+        tel1:col("tel 1","tel1","telefono"), tel2:col("tel 2","tel2"),
+        cell1:col("cell 1","cell1","cellulare"), cell2:col("cell 2","cell2"),
+        email1:col("email 1","email1","email","e-mail"), email2:col("email 2","email2"),
+        nasc:col("data nascita","nascita"),
+      };
+      if(ci.unita<0){ setErr("Colonna 'Unità' non trovata."); return; }
+      const val=(row,idx)=> idx>=0&&row[idx]!=null?String(row[idx]).trim():"";
+      const mese=String(new Date().getMonth()+1).padStart(2,"0");
+      const byUnit={}; const parsed=[];
+      for(let i=hi+1;i<aoa.length;i++){
+        const row=aoa[i]; if(!row||!row.length) continue;
+        const unita=val(row,ci.unita);
+        const cognome=val(row,ci.cognome), nome=val(row,ci.nome);
+        const nomeCompleto=(cognome+" "+nome).replace(/\s+/g," ").trim();
+        if(!unita&&!nomeCompleto) continue;
+        if(/totale|totali|generali/i.test(nomeCompleto)) continue;
+        if(/spese\s+inquilin/i.test(nomeCompleto)) continue; // riga inquilino: esclusa (import proprietari)
+        if(!nomeCompleto) continue;
+        const key=normInt(unita);
+        if(key&&byUnit[key]){
+          const ex=byUnit[key]; // comproprietario della stessa unità → nel campo "presso"
+          ex.presso = ex.presso ? ex.presso+" / "+nomeCompleto : nomeCompleto;
+          ex.comproprietari=(ex.comproprietari||[]).concat(nomeCompleto);
+          continue;
+        }
+        const primo=(cognome||nomeCompleto).split(/\s+/)[0]||"Utente";
+        const pw=primo.charAt(0).toUpperCase()+primo.slice(1,4).toLowerCase()+mese+"!";
+        const p={
+          unita, interno:unita, cod:val(row,ci.cod), cognome, nome, nomeCompleto,
+          presso:val(row,ci.presso), via:val(row,ci.via), cap:val(row,ci.cap),
+          localita:val(row,ci.citta), prov:val(row,ci.prov), cf:val(row,ci.cf),
+          telefono:val(row,ci.tel1), tel2:val(row,ci.tel2),
+          cell:val(row,ci.cell1), cell2:val(row,ci.cell2),
+          email:val(row,ci.email1), email2:val(row,ci.email2),
+          dataNasc:val(row,ci.nasc), password:pw, comproprietari:[],
+        };
+        parsed.push(p); if(key) byUnit[key]=p;
+      }
+      if(!parsed.length){ setErr("Nessun proprietario trovato nel file."); return; }
       setRows(parsed); setPreview(true);
-    }catch(e){setErr("Errore: "+e.message);}
+    }catch(e){ setErr("Errore lettura file: "+e.message); }
   };
 
   const doImport=async()=>{
-    if(!selCond){setErr("Seleziona un condominio."); return;}
+    if(!selCond){ setErr("Seleziona un condominio."); return; }
     setImporting(true); setErr(""); setProgress(0);
-    const ok=[],noEmail=[],failed=[];
     const condo=condominii?.find(c=>String(c.id)===String(selCond));
+    let existing=[];
+    try{ existing=await GET("profiles","cond_id=eq."+selCond+"&role=neq.inquilino&select=id,interno,role,cod_anagrafica",tok)||[]; }catch(e){}
+    const byInt={}; existing.forEach(p=>{ const k=normInt(p.interno); if(k&&!byInt[k]) byInt[k]=p; });
+    const creati=[],aggiornati=[],noEmail=[],failed=[];
     for(let i=0;i<rows.length;i++){
       const r=rows[i]; setProgress(Math.round(((i+1)/rows.length)*100));
+      const anag={
+        name:r.nomeCompleto, cognome:r.cognome||null, nome:r.nome||null,
+        interno:r.interno||null, cod_anagrafica:r.cod||null,
+        presso:r.presso||null, via:r.via||null, cap:r.cap||null,
+        localita:r.localita||null, prov:r.prov||null,
+        telefono:r.telefono||null, telefono2:r.tel2||null,
+        cell:r.cell||null, cell2:r.cell2||null,
+        email2:isRealEmail(r.email2)?r.email2:null,
+        codice_fiscale:r.cf||null, data_nascita:r.dataNasc||null,
+      };
       try{
-        let uid;
-        try {
-          const res = await createAuthUser(r.email||null, r.password);
-          uid = res.id;
-        } catch(authErr) {
-        // Email gia in uso: crea profilo secondario con auth_user_id del proprietario
-        const existing=await GET("profiles","email=eq."+encodeURIComponent(r.email||"")+"&limit=1",tok);
-        const authUserId=existing?.[0]?.auth_user_id||existing?.[0]?.id;
-        if(!authUserId) throw authErr;
-        const fakeEmail=(r.cognome||r.nomeCompleto||"user").toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
-        const res2=await createAuthUser(fakeEmail,r.password);
-        uid=res2.id;
-        // auth_user_id sara impostato nel POST qui sotto
-        r._authUserId=authUserId;
+        const ex=byInt[normInt(r.interno)];
+        if(ex){
+          // Aggiornamento in luogo: non tocco email di login né auth
+          await PATCH("profiles","id=eq."+ex.id,anag,tok);
+          aggiornati.push(r);
+        } else {
+          let uid, authId=null;
+          try{ const res=await createAuthUser(r.email||null,r.password); uid=res.id; }
+          catch(authErr){
+            const dup=await GET("profiles","email=eq."+encodeURIComponent(r.email||"")+"&select=id,auth_user_id&order=created_at",tok);
+            authId=(dup||[]).find(p=>p.auth_user_id&&p.auth_user_id!==p.id)?.auth_user_id||dup?.[0]?.auth_user_id||dup?.[0]?.id;
+            if(!authId) throw authErr;
+            const fake=(r.cognome||"user").toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
+            uid=(await createAuthUser(fake,r.password)).id;
+          }
+          await POST("profiles",{id:uid,auth_user_id:authId||uid,role:"condomino",cond_id:Number(selCond),
+            email:isRealEmail(r.email)?r.email:null, ...anag},tok);
+          if(isRealEmail(r.email)){
+            try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); creati.push(r); }
+            catch{ noEmail.push(r); }
+          } else noEmail.push(r);
+          await new Promise(res=>setTimeout(res,150));
         }
-        await POST("profiles",{
-          id:uid, auth_user_id:r._authUserId||uid, name:r.nomeCompleto, role:r.role||"condomino",
-          cond_id:Number(selCond),
-          email:isRealEmail(r.email)?r.email:null,
-          email2:isRealEmail(r.email2)?r.email2:null,
-          telefono:r.telefono||null, telefono2:r.tel2||null,
-          cell:r.cell||null, cell2:r.cell2||null, fax:r.fax||null,
-          presso:r.presso||null, via:r.via||null,
-          cap:r.cap||null, localita:r.localita||null, prov:r.prov||null,
-          perc_poss:r.percPoss||null, perc_rate:r.percRate||null,
-          perc_detraz:r.percDetraz||null,
-          codice_fiscale:r.cf||null, data_nascita:r.dataNasc||null,
-          tipo:r.tipo||null
-        },tok);
-        for(const inq of r.inquilini){
-          if(inq.nome) await POST("inquilini",{user_id:uid,nome:inq.nome,email:inq.email||null,tel:inq.tel||null},tok);
-        }
-        if(isRealEmail(r.email)){
-          try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); ok.push(r); }
-          catch{ noEmail.push(r); }
-        } else noEmail.push(r);
-        await new Promise(res=>setTimeout(res,200));
-      }catch(e){failed.push({...r,errore:e.message});}
+      }catch(e){ failed.push({...r,errore:e.message}); }
     }
-    setResults({ok,noEmail,failed}); setImporting(false);
+    setResults({creati,aggiornati,noEmail,failed}); setImporting(false);
   };
 
   const stampa=()=>{
     const condo=condominii?.find(c=>String(c.id)===String(selCond));
-    const tutti=[...(results?.ok||[]),...(results?.noEmail||[])];
+    const tutti=[...(results?.creati||[]),...(results?.noEmail||[])];
+    if(!tutti.length){ alert("Nessuna nuova credenziale da stampare (solo aggiornamenti)."); return; }
     const w=window.open("","_blank");
     w.document.write(`<html><head><title>Credenziali</title><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:8px;font-size:13px}th{background:#f1f5f9}@media print{button{display:none}}</style></head><body>
     <h2>Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.</h2>
-    <h3>Credenziali — ${condo?.nome||""}</h3>
+    <h3>Credenziali nuovi utenti — ${condo?.nome||""}</h3>
     <p>Data: ${new Date().toLocaleDateString("it-IT")} | Portale: studiomazzinibo.com</p>
-    <table><tr><th>Nome</th><th>Via</th><th>Email</th><th>Password</th><th>Inquilini</th></tr>
-    ${tutti.map(r=>`<tr><td>${r.nomeCompleto}</td><td>${r.via||""} ${r.localita||""}</td><td>${r.email||"—"}</td><td><strong>${r.password}</strong></td><td>${r.inquilini?.map(i=>i.nome).join(", ")||"—"}</td></tr>`).join("")}
-    </table><br><button onclick="window.print()">🖨️ Stampa</button></body></html>`);
+    <table><tr><th>Unità</th><th>Nome</th><th>Email</th><th>Password</th></tr>
+    ${tutti.map(r=>`<tr><td>${r.interno||""}</td><td>${r.nomeCompleto}</td><td>${r.email||"—"}</td><td><strong>${r.password}</strong></td></tr>`).join("")}
+    </table><br><button onclick="window.print()">Stampa</button></body></html>`);
     w.document.close();
   };
 
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-black text-gray-800">Importazione da Excel</h2>
-        <p className="text-gray-400 text-sm mt-1">Colonne attese: Nome · Presso · Via · CAP · Località · Prov. · Tipo Cond. · % Poss. · % Rate · % Detraz · Codice Fiscale · Data Nascita · Telefono · Tel 2 · Cellulare · Cell 2 · Fax · Email · Email 2</p>
+        <h2 className="text-2xl font-black text-gray-800">Import Proprietari</h2>
+        <p className="text-gray-400 text-sm mt-1">File "Elenco anagrafiche" del gestionale (solo proprietari). Colonne lette: Unità · Cod. Anag. · Cognome · Nome · Presso · Via · CAP · Città · Prov. · Cod. Fiscale · Tel 1/2 · Cell 1/2 · email 1/2 · Data Nascita. I comproprietari della stessa unità vengono uniti in un unico utente (secondo nominativo in "presso"). Reimportando lo stesso file gli utenti esistenti vengono aggiornati per numero di unità, senza duplicati.</p>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
         <Sel label="Condominio di destinazione" value={selCond} onChange={e=>setSelCond(e.target.value)}>
           {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
         </Sel>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 mt-3">File Excel (.xlsx)</label>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 mt-3">File Excel (.xlsx / .xls)</label>
         <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
       </div>
       <ErrBox msg={err}/>
@@ -1414,11 +1415,10 @@ function AdminImport({tok}) {
             <div>
               <p className="font-bold text-gray-800">Anteprima — {rows.length} proprietari</p>
               <p className="text-xs text-gray-400">
-                {rows.filter(r=>isRealEmail(r.email)).length} con email ·{" "}
-                {rows.reduce((a,r)=>a+r.inquilini.length,0)} inquilini associati
+                {rows.filter(r=>isRealEmail(r.email)).length} con email · {rows.filter(r=>r.cod).length} con codice anagrafica
               </p>
             </div>
-            <Btn onClick={doImport} disabled={importing}>{importing?`Importazione... ${progress}%`:"Importa tutti"}</Btn>
+            <Btn onClick={doImport} disabled={importing}>{importing?`Importazione... ${progress}%`:"Importa / Aggiorna"}</Btn>
           </div>
           {importing&&<div className="h-1 bg-gray-100"><div className="h-1 bg-blue-500 transition-all" style={{width:`${progress}%`}}/></div>}
           <div className="max-h-80 overflow-y-auto">
@@ -1426,13 +1426,13 @@ function AdminImport({tok}) {
               <div key={i} className={`px-5 py-3 ${i<rows.length-1?"border-b border-gray-50":""}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-gray-800 text-sm">{r.nomeCompleto}</p>
+                    <p className="font-medium text-gray-800 text-sm">Int. {r.interno||"—"} · {r.nomeCompleto} {r.cod?<span className="text-xs text-gray-400">(cod. {r.cod})</span>:null}</p>
                     <p className="text-xs text-gray-400">{r.via?r.via+" · ":""}{r.localita} {r.prov?"("+r.prov+")":""} · {r.email||"⚠ nessuna email"}</p>
                   </div>
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-mono shrink-0 ml-3">{r.password}</span>
                 </div>
-                {r.inquilini.length>0&&(
-                  <p className="text-xs text-blue-500 mt-1 ml-1">🏠 {r.inquilini.map(i=>i.nome).join(", ")}</p>
+                {r.comproprietari&&r.comproprietari.length>0&&(
+                  <p className="text-xs text-blue-500 mt-1 ml-1">+ comproprietari: {r.comproprietari.join(", ")}</p>
                 )}
               </div>
             ))}
@@ -1442,11 +1442,12 @@ function AdminImport({tok}) {
       {results&&(
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <p className="font-bold text-gray-800 mb-3">Importazione completata</p>
-          <p className="text-sm text-emerald-600 mb-1">✅ {results.ok.length} proprietari importati con email di benvenuto</p>
-          <p className="text-sm text-amber-600 mb-1">⚠️ {results.noEmail.length} importati senza email</p>
-          {results.failed.length>0&&<><p className="text-sm text-red-600 mb-1">❌ {results.failed.length} errori</p>{results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">{r.nomeCompleto}: {r.errore}</p>)}</>}
+          <p className="text-sm text-emerald-600 mb-1">✅ {results.creati.length} nuovi proprietari (email di benvenuto inviata)</p>
+          <p className="text-sm text-blue-600 mb-1">🔁 {results.aggiornati.length} aggiornati (già presenti)</p>
+          <p className="text-sm text-amber-600 mb-1">⚠️ {results.noEmail.length} nuovi senza email</p>
+          {results.failed.length>0&&<><p className="text-sm text-red-600 mb-1">❌ {results.failed.length} errori</p>{results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">Int. {r.interno} {r.nomeCompleto}: {r.errore}</p>)}</>}
           <div className="flex gap-3 mt-4">
-            <Btn variant="secondary" onClick={stampa}>🖨️ Stampa credenziali</Btn>
+            <Btn variant="secondary" onClick={stampa}>Stampa credenziali nuovi</Btn>
             <Btn variant="secondary" onClick={()=>{setResults(null);setPreview(false);setRows([]);}}>Nuova importazione</Btn>
           </div>
         </div>
