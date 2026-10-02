@@ -1765,196 +1765,155 @@ function RataModal({mode,data,onSave,onClose}) {
 
 // ── Import Rate da Excel ──────────────────────────────────────────────────────
 function ImportRateExcelModal({condId, tok, onClose}) {
+  // Import rate dal "Riparto preventivo" — aggancio per ruolo (prop per unità, inq per unità+nome)
   const SBU = import.meta.env.VITE_SUPABASE_URL;
   const SBK = import.meta.env.VITE_SUPABASE_KEY;
-  const [rateColonne,setRateColonne]=useState([]); // [{colonna, numero_rata, data_scadenza}]
-  const [righe,setRighe]=useState([]); // [{unita, importi:{colonna:valore}}]
+  const [rateColonne,setRateColonne]=useState([]);
+  const [righe,setRighe]=useState([]);
+  const [profili,setProfili]=useState([]);
   const [preview,setPreview]=useState(false);
   const [importing,setImporting]=useState(false);
   const [progress,setProgress]=useState(0);
   const [err,setErr]=useState("");
 
-  const parseData=(str)=>{
-    // Estrae data da stringhe tipo "entro 17/06/25" o "entro 15/11/2025"
-    const m=str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-    if(!m) return "";
-    let [,g,mm,a]=m;
-    if(a.length===2) a="20"+a;
-    return a+"-"+mm.padStart(2,"0")+"-"+g.padStart(2,"0");
-  };
-
-  const parseNumeroRata=(str)=>{
-    const m=str.match(/([1-9])\s*[\u00B0oa]/i) || str.match(/^([1-9])/);
-    return m?Number(m[1]):null;
-  };
+  const parseData=(str)=>{ const m=String(str).match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/); if(!m) return ""; let [,g,mm,a]=m; if(a.length===2) a="20"+a; return a+"-"+mm.padStart(2,"0")+"-"+g.padStart(2,"0"); };
+  const parseNumeroRata=(str)=>{ const m=String(str).match(/([1-9])\s*[°oa]/i)||String(str).match(/^\s*([1-9])/); return m?Number(m[1]):null; };
+  const parseImporto=(v)=>{ const s=String(v==null?"":v).replace(/[^\d,.-]/g,"").replace(",","."); const n=parseFloat(s); return isNaN(n)?0:n; };
 
   const parseExcel=async xfile=>{
     setErr(""); setRateColonne([]); setRighe([]); setPreview(false);
     try{
       const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
       const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
-      const data=XLSX.utils.sheet_to_json(ws,{defval:""});
-      if(!data.length){setErr("File vuoto."); return;}
+      const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""});
+      const cell2str=h=>{ if(typeof h==="number"){ try{const info=XLSX.SSF.parse_date_code(h); if(info&&info.y) return String(info.d).padStart(2,"0")+"/"+String(info.m).padStart(2,"0")+"/"+info.y;}catch(e){} } return String(h==null?"":h); };
+      // intestazione: riga con "Unità" e una colonna "Rata/entro"
+      let hi=-1;
+      for(let i=0;i<aoa.length;i++){ const low=aoa[i].map(c=>cell2str(c).toLowerCase()); if(low.some(x=>x.includes("unit"))&&low.some(x=>x.includes("rata")||x.includes("entro"))){ hi=i; break; } }
+      if(hi<0){ setErr("Intestazione non trovata. Serve una riga con 'Unità' e le colonne delle rate (es. \"1° Rata entro 07/07/26\")."); return; }
+      const header=aoa[hi].map(cell2str);
+      let unitaIdx=header.findIndex(h=>/unit/i.test(h)); if(unitaIdx<0) unitaIdx=0;
+      const rataCols=[];
+      header.forEach((h,j)=>{ if(j===unitaIdx) return; const ds=parseData(h); if(ds) rataCols.push({idx:j,colonna:h,numero_rata:parseNumeroRata(h)||rataCols.length+1,data_scadenza:ds,descrizione:h.replace(/\s+/g," ").trim()}); });
+      if(!rataCols.length){ setErr("Nessuna colonna rata con data trovata. Intestazioni: "+header.filter(Boolean).join(" | ")); return; }
 
-      // Leggi intestazioni grezze (gestisce date convertite da Excel)
-      const rawHdr=XLSX.utils.sheet_to_json(ws,{header:1,raw:true})[0]||[];
-      const headerStr=rawHdr.map(h=>{
-        if(typeof h==="number"){
-          // Numero seriale Excel → converti in data
-          try{
-            const info=XLSX.SSF.parse_date_code(h);
-            if(info) return String(info.d).padStart(2,"0")+"/"+String(info.m).padStart(2,"0")+"/"+info.y;
-          }catch(e){}
-        }
-        return String(h||"");
-      });
-      // Rimappa i dati con le intestazioni stringa
-      const data2=XLSX.utils.sheet_to_json(ws,{defval:"",header:headerStr}).slice(1);
-
-      const unitaCol=headerStr.find(k=>k.toLowerCase().includes("unit")||k.toLowerCase()==="interno")||headerStr[0];
-
-      const rataCols=headerStr.filter(k=>k&&k!==unitaCol).map((k,i)=>{
-        const data_scadenza=parseData(k);
-        const numero_rata=parseNumeroRata(k)||i+1;
-        return {colonna:k, numero_rata, data_scadenza, descrizione:k};
-      }).filter(r=>r.data_scadenza);
-
-      if(!rataCols.length){
-        setErr("Nessuna colonna rata trovata. Intestazioni rilevate: "+headerStr.join(" | "));
-        return;
+      let curUnit=null; const parsed=[];
+      for(let i=hi+1;i<aoa.length;i++){
+        const row=aoa[i]; if(!row||!row.length) continue;
+        const first=cell2str(row[unitaIdx]).replace(/\s+/g," ").trim();
+        if(!first) continue;
+        if(/totale|totali|generali/i.test(first)) continue;
+        const importi={}; let hasAmt=false;
+        rataCols.forEach(rc=>{ const n=parseImporto(row[rc.idx]); importi[rc.colonna]=n; if(n>0) hasAmt=true; });
+        const isInq=/\binq\b|inq\./i.test(first);
+        const m=first.match(/^(\d+)\s+(.+)$/);
+        if(!m && !isInq && !hasAmt) continue; // intestazioni di sezione (es. "NEGOZI")
+        let unit,name,role;
+        if(m && !isInq){ unit=m[1]; name=m[2].trim(); role="prop"; curUnit=unit; }
+        else if(isInq){ unit=curUnit; name=first.replace(/\s*\binq\.?.*$/i,"").replace(/^\d+\s+/,"").replace(/\s*-\s*$/,"").trim(); role="inq"; }
+        else { unit=curUnit; name=first.trim(); role="prop"; }
+        parsed.push({unit:unit||"",name,role,isInq:role==="inq",importi});
       }
+      if(!parsed.length){ setErr("Nessuna riga valida trovata."); return; }
 
-      // Usa data2 al posto di data per le righe
-      const dataToUse=data2.length>0?data2:data;
-
-      const righeP=dataToUse.filter(r=>String(r[unitaCol]||"").trim()).map(r=>({
-        unita:String(r[unitaCol]).trim(),
-        importi:Object.fromEntries(rataCols.map(rc=>[rc.colonna, String(r[rc.colonna]||"").replace(/[€s]/g,"").replace(",",".")]))
-      })).filter(r=>r.unita&&rataCols.some(rc=>parseFloat(r.importi[rc.colonna])>0));
-
-      setRateColonne(rataCols);
-      setRighe(righeP);
-      setPreview(true);
-    }catch(e){setErr("Errore: "+e.message);}
+      // carica profili e abbina per ruolo
+      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=neq.admin&select=id,interno,name,role&order=name",{headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
+      const prof=await res.json()||[];
+      const abbina=r=>{
+        const ui=normInt(r.unit); const n=normNome(r.name); const tt=tokNome(r.name);
+        const perNome=arr=>{ let b=arr.filter(p=>normNome(p.name)===n); if(!b.length&&tt.length) b=arr.filter(p=>{const pt=tokNome(p.name); return pt.length&&(tt.every(t=>pt.includes(t))||pt.every(t=>tt.includes(t)));}); return b; };
+        const pool=prof.filter(p=> r.role==="inq" ? p.role==="inquilino" : p.role!=="inquilino");
+        let cands=ui?pool.filter(p=>normInt(p.interno)===ui):[];
+        if(cands.length>1){ const bn=perNome(cands); if(bn.length) cands=bn; }
+        if(cands.length===1) return {userId:cands[0].id,esito:"ok"};
+        if(cands.length>1) return {userId:"",esito:"multi"};
+        const bn=perNome(pool);
+        if(bn.length===1) return {userId:bn[0].id,esito:"nome"};
+        return {userId:"",esito:"nomatch"};
+      };
+      const righeP=parsed.map(r=>({...r,...abbina(r)}));
+      setProfili(prof); setRateColonne(rataCols); setRighe(righeP); setPreview(true);
+    }catch(e){ setErr("Errore: "+e.message); }
   };
+
+  const setUser=(i,uid)=>setRighe(rs=>rs.map((r,j)=>j===i?{...r,userId:uid}:r));
 
   const doImport=async()=>{
     setImporting(true); setProgress(0);
     try{
-      // 1. Carica utenti del condominio
-      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,interno,name",
-        {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
-      const utenti=await res.json()||[];
-      const mapUtenti={};
-      // Mappa per numero interno, scala, e parole del nome
-      utenti.forEach(u=>{
-        if(u.interno) mapUtenti[String(u.interno).trim().toLowerCase()]=u;
-        if(u.scala && u.scala!==u.interno) mapUtenti[String(u.scala).trim().toLowerCase()]=u;
-      });
-      // Funzione ricerca con fallback su nome
-      const trovaUtente=(unita)=>{
-        const num=String(unita).match(/^(\d+[a-zA-Z]?)/)?.[1]||"";
-        // Prova numero esatto
-        let u=mapUtenti[num.toLowerCase()]||mapUtenti[String(unita).trim().toLowerCase()];
-        if(u) return u;
-        // Prova matching per nome (parole >3 caratteri)
-        const unitaUp=String(unita).toUpperCase();
-        return utenti.find(usr=>{
-          const nome=(usr.name||usr.cognome||"").toUpperCase();
-          return nome.split(/\s+/).some(w=>w.length>3&&unitaUp.includes(w));
-        })||null;
-      };
       const rataIdMap={};
       for(const rc of rateColonne){
-        const r1=await fetch(SBU+"/rest/v1/rate_condominio?cond_id=eq."+condId+"&numero_rata=eq."+rc.numero_rata+"&select=id",
-          {headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
+        const r1=await fetch(SBU+"/rest/v1/rate_condominio?cond_id=eq."+condId+"&numero_rata=eq."+rc.numero_rata+"&select=id",{headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
         const existing=await r1.json();
         if(existing&&existing.length>0){
           rataIdMap[rc.colonna]=existing[0].id;
-          // Aggiorna la data se diversa
-          await fetch(SBU+"/rest/v1/rate_condominio?id=eq."+existing[0].id,{
-            method:"PATCH",
-            headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=minimal"},
-            body:JSON.stringify({data_scadenza:rc.data_scadenza,descrizione:rc.descrizione})
-          });
+          await fetch(SBU+"/rest/v1/rate_condominio?id=eq."+existing[0].id,{method:"PATCH",headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=minimal"},body:JSON.stringify({data_scadenza:rc.data_scadenza,descrizione:rc.descrizione})});
         } else {
-          // Crea nuova rata
-          const r2=await fetch(SBU+"/rest/v1/rate_condominio",{
-            method:"POST",
-            headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=representation"},
-            body:JSON.stringify({cond_id:Number(condId),numero_rata:rc.numero_rata,data_scadenza:rc.data_scadenza,descrizione:rc.descrizione})
-          });
-          const nuova=await r2.json();
-          rataIdMap[rc.colonna]=nuova[0]?.id;
+          const r2=await fetch(SBU+"/rest/v1/rate_condominio",{method:"POST",headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=representation"},body:JSON.stringify({cond_id:Number(condId),numero_rata:rc.numero_rata,data_scadenza:rc.data_scadenza,descrizione:rc.descrizione})});
+          const nuova=await r2.json(); rataIdMap[rc.colonna]=nuova[0]?.id;
         }
       }
-
-      // 3. Importa importi per ogni utente
       let imp=0, skip=0;
+      const daFare=righe.filter(r=>r.userId);
       for(let i=0;i<righe.length;i++){
-        const riga=righe[i];
-        setProgress(Math.round(((i+1)/righe.length)*100));
-        const utente=trovaUtente(riga.unita);
-        if(!utente){skip++; continue;}
+        const riga=righe[i]; setProgress(Math.round(((i+1)/righe.length)*100));
+        if(!riga.userId){ skip++; continue; }
         for(const rc of rateColonne){
-          const importo=parseFloat(riga.importi[rc.colonna]);
-          if(isNaN(importo)||importo===0) continue;
-          const rataId=rataIdMap[rc.colonna];
-          if(!rataId) continue;
-          // Upsert importo
-          await fetch(SBU+"/rest/v1/rate_condomino?on_conflict=rata_id,user_id",{
-            method:"POST",
-            headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=minimal,resolution=merge-duplicates"},
-            body:JSON.stringify({rata_id:rataId,user_id:utente.id,importo,notificato:false})
-          });
+          const importo=Number(riga.importi[rc.colonna]); if(!(importo>0)) continue;
+          const rataId=rataIdMap[rc.colonna]; if(!rataId) continue;
+          await fetch(SBU+"/rest/v1/rate_condomino?on_conflict=rata_id,user_id",{method:"POST",headers:{apikey:SBK,"Authorization":"Bearer "+tok,"Content-Type":"application/json","Prefer":"return=minimal,resolution=merge-duplicates"},body:JSON.stringify({rata_id:rataId,user_id:riga.userId,importo,notificato:false})});
           imp++;
         }
       }
-      alert("Importazione completata: "+imp+" importi caricati"+(skip>0?", "+skip+" unità non trovate":"")+".");
+      alert("Importazione completata: "+imp+" importi caricati"+(skip>0?", "+skip+" righe non abbinate (saltate)":"")+".");
       onClose();
-    }catch(e){alert("Errore: "+e.message);}
+    }catch(e){ alert("Errore: "+e.message); }
     setImporting(false);
   };
 
+  const ESITI={ok:["abbinato","bg-emerald-100 text-emerald-700"],nome:["per nome","bg-emerald-50 text-emerald-600"],multi:["scegli","bg-amber-100 text-amber-700"],nomatch:["non abbinato","bg-red-100 text-red-600"]};
+  const nonAbb=righe.filter(r=>!r.userId).length;
+
   return (
-    <Modal title="Importa Rate da Excel" onClose={onClose}>
-      <p className="text-xs text-gray-400 mb-3">
-        Il file deve avere una colonna <strong>Unità</strong> e una colonna per ogni rata con la data nella intestazione (es. "1° Rata entro 17/06/25").
-      </p>
+    <Modal title="Importa Rate dal Riparto" onClose={onClose}>
+      <p className="text-xs text-gray-400 mb-3">File "Riparto preventivo" del gestionale: colonna <strong>Unità</strong> e una colonna per rata con la data (es. "1° Rata entro 07/07/26"). I proprietari si agganciano per unità, gli inquilini (righe "inq.") per unità + nome.</p>
       <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 mb-3"/>
       <ErrBox msg={err}/>
       {preview&&rateColonne.length>0&&(
         <div className="mb-3">
           <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Rate rilevate ({rateColonne.length})</p>
           <div className="flex gap-2 flex-wrap mb-3">
-            {rateColonne.map((rc,i)=>(
-              <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
-                Rata {rc.numero_rata} · {new Date(rc.data_scadenza).toLocaleDateString("it-IT")}
-              </span>
-            ))}
+            {rateColonne.map((rc,i)=>(<span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">Rata {rc.numero_rata} · {new Date(rc.data_scadenza).toLocaleDateString("it-IT")}</span>))}
           </div>
-          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Unità trovate ({righe.length})</p>
-          <div className="max-h-40 overflow-y-auto border border-gray-100 rounded-xl mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Righe ({righe.length}) · {nonAbb>0?nonAbb+" da sistemare":"tutte abbinate"}</p>
+          <div className="max-h-56 overflow-y-auto border border-gray-100 rounded-xl mb-3">
             {righe.map((r,i)=>(
-              <div key={i} className={"flex items-center justify-between px-3 py-2 text-sm "+(i<righe.length-1?"border-b border-gray-50":"")}>
-                <span className="font-medium text-gray-700">Int. {r.unita}</span>
-                      {r.role==="inquilino"&&<span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full ml-1">Inquilino</span>}
-                <span className="text-xs text-gray-400">
-                  {rateColonne.map(rc=>"€"+r.importi[rc.colonna]).join(" · ")}
-                </span>
+              <div key={i} className={"px-3 py-2 text-sm "+(i<righe.length-1?"border-b border-gray-50":"")}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-gray-700 truncate">Int. {r.unit||"—"} · {r.name} {r.isInq&&<span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">inq.</span>}</span>
+                  <span className={"text-xs px-2 py-0.5 rounded-full font-medium shrink-0 "+ESITI[r.esito][1]}>{ESITI[r.esito][0]}</span>
+                </div>
+                {!r.userId&&(
+                  <select value={r.userId} onChange={e=>setUser(i,e.target.value)} className="mt-1 w-full border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50">
+                    <option value="">— non importare —</option>
+                    {profili.filter(p=> r.isInq? p.role==="inquilino" : p.role!=="inquilino").map(p=><option key={p.id} value={p.id}>{p.name} · Int.{p.interno||"—"}{p.role==="inquilino"?" (inq.)":""}</option>)}
+                  </select>
+                )}
               </div>
             ))}
           </div>
           {importing&&<div className="h-1 bg-gray-100 rounded mb-2"><div className="h-1 bg-blue-500 transition-all rounded" style={{width:progress+"%"}}/></div>}
           <div className="flex justify-end gap-3">
             <Btn variant="secondary" onClick={onClose}>Annulla</Btn>
-            <Btn onClick={doImport} disabled={importing}>{importing?"Importazione "+progress+"%...":"Importa "+righe.length+" unità"}</Btn>
+            <Btn onClick={doImport} disabled={importing}>{importing?"Importazione "+progress+"%...":"Importa "+righe.filter(r=>r.userId).length+" righe"}</Btn>
           </div>
         </div>
       )}
     </Modal>
   );
 }
+
+
 
 function BulkImportiModal({condId,rate,tok,onClose}) {
   const [users,setUsers]=useState([]); const [vals,setVals]=useState({}); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false);
