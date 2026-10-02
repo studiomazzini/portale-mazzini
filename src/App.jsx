@@ -595,6 +595,38 @@ async function leggiPdfVersamenti(file){
   return {rows,totaleDichiarato:Math.round(totDich*100)/100,totaleLetto:totLetto,scartati,altriTipi:0};
 }
 
+// Legge l'export Excel "Elenco versamenti dello Stabile" (con colonna Tipo Cond).
+async function leggiVersamentiXlsx(file){
+  const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
+  const wb=XLSX.read(await file.arrayBuffer(),{cellDates:true});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false});
+  const norm=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\./g,"").replace(/\s+/g," ").trim();
+  const parseNum=s=>{ s=String(s).trim(); if(!s) return NaN; if(s.includes(",")&&s.includes(".")) return parseFloat(s.replace(/\./g,"").replace(",",".")); if(s.includes(",")) return parseFloat(s.replace(",",".")); return parseFloat(s); };
+  const parseDate=s=>{ s=String(s).trim(); let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+"-"+m[2]+"-"+m[3]; m=s.match(/(\d{2})\/(\d{2})\/(\d{4})/); if(m) return m[3]+"-"+m[2]+"-"+m[1]; const d=new Date(s); return isNaN(d)?"":d.toISOString().slice(0,10); };
+  const stripPref=s=>String(s||"").replace(/^\s*\d+\s*-\s*/,"").trim();
+  let cod=null;
+  for(const row of aoa){ const m=row.join(" ").match(/stabile\s+(\d{1,4})/i); if(m){ cod=normCod(m[1]); break; } }
+  let hi=-1;
+  for(let i=0;i<aoa.length;i++){ const c=aoa[i].map(norm); if(c.includes("unita")&&c.some(x=>x.includes("condomin"))&&c.some(x=>x.includes("importo"))){ hi=i; break; } }
+  if(hi<0) throw new Error("Intestazione non trovata (servono le colonne Unita, Condomino, Importo).");
+  const header=aoa[hi].map(norm);
+  const col=(...names)=>{ for(const n of names){ let i=header.findIndex(h=>h===n); if(i>=0) return i; i=header.findIndex(h=>h.includes(n)); if(i>=0) return i; } return -1; };
+  const ci={unita:col("unita","unit"),cond:col("condomino","condomin"),rata:col("rata"),imp:col("importo"),dver:col("data vers"),tipo:col("tipo cond","tipo")};
+  const val=(r,i)=> i>=0&&r[i]!=null?String(r[i]).trim():"";
+  const rows=[]; let totDich=0;
+  for(let i=hi+1;i<aoa.length;i++){
+    const row=aoa[i]; if(!row||!row.length) continue;
+    const mt=row.join(" ").match(/totale\s*=\s*([\d.,]+)/i); if(mt){ totDich+=parseNum(mt[1])||0; continue; }
+    const imp=parseNum(val(row,ci.imp)); const cond=val(row,ci.cond);
+    if(!(imp>0)||!cond) continue;
+    rows.push({codice:cod,unita:val(row,ci.unita),nome:stripPref(cond),rata:val(row,ci.rata),importo:imp,data:parseDate(val(row,ci.dver)),tipo:val(row,ci.tipo).toUpperCase()});
+  }
+  const visti={};
+  for(const r of rows){ const base=r.codice+"|"+r.unita+"|"+r.data+"|"+r.rata+"|"+r.importo.toFixed(2)+"|"+normNome(r.nome)+"|"+r.tipo; visti[base]=(visti[base]||0)+1; r.chiave=base+"|"+visti[base]; }
+  return {rows,totaleDichiarato:Math.round(totDich*100)/100,totaleLetto:Math.round(rows.reduce((s,r)=>s+r.importo,0)*100)/100,scartati:0};
+}
+
 // ── Admin: registrazione pagamenti da PDF ────────────────────────────────────
 function AdminPagamenti({tok}) {
   const [righe,setRighe]=useState([]); const [profPerCond,setProfPerCond]=useState({});
@@ -605,7 +637,8 @@ function AdminPagamenti({tok}) {
     if(!file) return;
     setErr(""); setEsito(null); setRighe([]); setInfo(null); setLoading(true);
     try{
-      const {rows,totaleDichiarato,totaleLetto,scartati}=await leggiPdfVersamenti(file);
+      const _n=(file.name||"").toLowerCase();
+      const {rows,totaleDichiarato,totaleLetto,scartati}=(_n.endsWith(".xls")||_n.endsWith(".xlsx"))?await leggiVersamentiXlsx(file):await leggiPdfVersamenti(file);
       if(!rows.length) throw new Error("Nessun versamento trovato. Verifica che sia la stampa \"Elenco versamenti dello Stabile\" del gestionale.");
       const conds=await GET("condominii","select=id,nome,codice",tok)||[];
       const perCod={}; conds.forEach(c=>{ if(c.codice!=null&&String(c.codice).trim()!=="") perCod[normCod(c.codice)]=c; });
@@ -613,20 +646,24 @@ function AdminPagamenti({tok}) {
       const ppc={};
       for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,interno,cond_id,role&order=name",tok)||[];
 
-      // Abbinamento: stabile (dal codice) + Unità (interno). Nome solo come ripiego/spareggio.
+      // Abbinamento per ruolo: PROP/USUF -> proprietario per unita; INQU -> inquilino per unita+nome; EX* ignorati.
       const out=rows.map(r=>{
         const c=perCod[r.codice];
         const base={...r,condId:c?.id||null,condNome:c?.nome||"",userId:"",esito:"nocond"};
         if(!c) return base;
+        const tipo=String(r.tipo||"").toUpperCase();
+        if(tipo.startsWith("EX")) return {...base,esito:"ex"};
         const lista=ppc[c.id]||[]; const ui=normInt(r.unita);
         const n=normNome(r.nome), tt=tokNome(r.nome);
         const perNome=arr=>{ let b=arr.filter(p=>normNome(p.name)===n); if(!b.length&&tt.length) b=arr.filter(p=>{const pt=tokNome(p.name); return pt.length&&(tt.every(t=>pt.includes(t))||pt.every(t=>tt.includes(t)));}); return b; };
-        let cands = ui ? lista.filter(p=>normInt(p.interno)===ui) : [];
-        let via = cands.length?"interno":"";
-        if(cands.length>1){ const bn=perNome(cands); if(bn.length) cands=bn; const prop=cands.filter(p=>p.role!=="inquilino"); if(prop.length) cands=prop; }
-        if(!cands.length){ cands=perNome(lista); via=cands.length?"nome":""; const prop=cands.filter(p=>p.role!=="inquilino"); if(prop.length&&cands.length>1) cands=prop; }
-        if(cands.length===1) return {...base,userId:cands[0].id,esito:via==="nome"?"nome":"ok"};
+        const isInq=tipo.startsWith("INQ");
+        const pool=lista.filter(p=> isInq ? p.role==="inquilino" : p.role!=="inquilino");
+        let cands = ui ? pool.filter(p=>normInt(p.interno)===ui) : [];
+        if(cands.length>1){ const bn=perNome(cands); if(bn.length) cands=bn; }
+        if(cands.length===1) return {...base,userId:cands[0].id,esito:isInq?"ok_inq":"ok"};
         if(cands.length>1)  return {...base,esito:"multi"};
+        const bn=perNome(pool);
+        if(bn.length===1) return {...base,userId:bn[0].id,esito:"nome"};
         return {...base,esito:"nomatch"};
       });
 
@@ -662,7 +699,9 @@ function AdminPagamenti({tok}) {
 
   const ESITI={
     ok:["Abbinato (unità)","bg-emerald-100 text-emerald-700"],
+    ok_inq:["Abbinato inquilino","bg-emerald-100 text-emerald-700"],
     nome:["Abbinato (nome)","bg-emerald-50 text-emerald-600"],
+    ex:["Ex — ignorato","bg-gray-100 text-gray-400"],
     multi:["Più profili: scegli","bg-amber-100 text-amber-700"],
     nomatch:["Non abbinato","bg-red-100 text-red-600"],
     nocond:["Stabile non nel portale","bg-gray-100 text-gray-500"],
@@ -676,9 +715,9 @@ function AdminPagamenti({tok}) {
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-2">Registra Pagamenti</h2>
-      <p className="text-gray-400 text-sm mb-5">Carica la stampa "Elenco versamenti dello Stabile" del gestionale (PDF). I versamenti vengono abbinati per stabile e numero di unità; controlla l'anteprima prima di confermare.</p>
+      <p className="text-gray-400 text-sm mb-5">Carica l'export "Elenco versamenti dello Stabile" del gestionale (Excel .xls/.xlsx oppure PDF). Abbinamento: proprietari e usufruttuari per unità, inquilini per unità + nome; gli ex proprietari/inquilini vengono ignorati. Controlla l'anteprima prima di confermare.</p>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-4">
-        <input type="file" accept="application/pdf,.pdf" disabled={loading||saving}
+        <input type="file" accept="application/pdf,.pdf,.xls,.xlsx" disabled={loading||saving}
           onChange={e=>{carica(e.target.files?.[0]); e.target.value="";}}
           className="text-sm text-gray-600 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-blue-600 file:text-white file:font-medium"/>
       </div>
@@ -706,7 +745,7 @@ function AdminPagamenti({tok}) {
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-                <th className="p-3">Stabile</th><th className="p-3">Unità</th><th className="p-3">Nominativo (PDF)</th><th className="p-3">Rata</th><th className="p-3 text-right">Importo</th><th className="p-3">Data</th><th className="p-3">Condòmino</th><th className="p-3">Esito</th>
+                <th className="p-3">Stabile</th><th className="p-3">Unità</th><th className="p-3">Nominativo</th><th className="p-3">Tipo</th><th className="p-3">Rata</th><th className="p-3 text-right">Importo</th><th className="p-3">Data</th><th className="p-3">Condòmino</th><th className="p-3">Esito</th>
               </tr></thead>
               <tbody>
                 {righe.map((r,i)=>(
@@ -714,6 +753,7 @@ function AdminPagamenti({tok}) {
                     <td className="p-3"><p className="font-semibold text-gray-700">{r.codice}</p><p className="text-xs text-gray-400">{r.condNome||"—"}</p></td>
                     <td className="p-3 text-gray-700">{r.unita||"—"}</td>
                     <td className="p-3 text-gray-700">{r.nome}</td>
+                    <td className="p-3 text-gray-500">{r.tipo||"—"}</td>
                     <td className="p-3 text-gray-600">{r.rata||"—"}</td>
                     <td className="p-3 text-right font-semibold text-gray-800 whitespace-nowrap">{fmtEur(r.importo)}</td>
                     <td className="p-3 whitespace-nowrap text-gray-600">{fmtData(r.data)}</td>
