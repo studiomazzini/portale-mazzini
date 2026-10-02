@@ -842,6 +842,7 @@ function AdminPanel({user,onLogout,view,setView}) {
     {id:"condominii",  label:"Condomìni",      icon:"🏢"},
     {id:"utenti",      label:"Utenti",          icon:"👥"},
     {id:"importa",     label:"Import Proprietari",   icon:"📥"},
+    {id:"importaInq",   label:"Import Inquilini",  icon:"🔑"},
     {id:"rate",        label:"Rate",             icon:"📅"},
     {id:"pagamenti",   label:"Registra Pagamenti", icon:"💶"},
     {id:"documenti",   label:"Documenti",        icon:"📁"},
@@ -859,6 +860,7 @@ function AdminPanel({user,onLogout,view,setView}) {
           {view==="condominii"   && <AdminCondominii tok={user.token}/>}
           {view==="utenti"       && <AdminUtenti tok={user.token}/>}
           {view==="importa"      && <AdminImport tok={user.token}/>}
+          {view==="importaInq"   && <AdminImportInquilini tok={user.token}/>}
           {view==="rate"         && <AdminRate tok={user.token}/>}
           {view==="pagamenti"    && <AdminPagamenti tok={user.token}/>}
           {view==="documenti"    && <AdminDocumenti tok={user.token}/>}
@@ -1448,6 +1450,191 @@ function AdminImport({tok}) {
           {results.failed.length>0&&<><p className="text-sm text-red-600 mb-1">❌ {results.failed.length} errori</p>{results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">Int. {r.interno} {r.nomeCompleto}: {r.errore}</p>)}</>}
           <div className="flex gap-3 mt-4">
             <Btn variant="secondary" onClick={stampa}>Stampa credenziali nuovi</Btn>
+            <Btn variant="secondary" onClick={()=>{setResults(null);setPreview(false);setRows([]);}}>Nuova importazione</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Admin Import Inquilini (elenco anagrafiche inquilini + cod_anagrafica) ──────
+function AdminImportInquilini({tok}) {
+  const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta&order=nome",tok),[tok]);
+  const [selCond,setSelCond]=useState("");
+  const [rows,setRows]=useState([]); const [preview,setPreview]=useState(false);
+  const [importing,setImporting]=useState(false); const [progress,setProgress]=useState(0);
+  const [results,setResults]=useState(null); const [err,setErr]=useState("");
+  useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
+
+  const normInt = s => String(s??"").toUpperCase().replace(/\s+/g,"").replace(/^0+(?=\d)/,"").trim();
+  const normNm  = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\bINQ\.?\b/g,"").replace(/[^A-Z0-9]+/g," ").trim();
+
+  const parseExcel=async xfile=>{
+    setErr(""); setRows([]); setPreview(false); setResults(null);
+    try{
+      const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
+      const buf=await xfile.arrayBuffer(); const wb=XLSX.read(buf,{cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false});
+      const norm=s=>String(s||"").toLowerCase().replace(/\./g,"").replace(/\s+/g," ").trim();
+      let hi=-1;
+      for(let i=0;i<aoa.length;i++){
+        const cells=aoa[i].map(norm);
+        const hasUnit=cells.some(c=>c==="unita"||c==="unit"||c.startsWith("unit"));
+        if(hasUnit && (cells.some(c=>c.includes("cod anag"))||cells.some(c=>c==="cognome"))){ hi=i; break; }
+      }
+      if(hi<0){ setErr("Intestazione non trovata. Il file deve contenere una riga con 'Unità' e 'Cod. Anag.' (o 'Cognome')."); return; }
+      const header=aoa[hi].map(norm);
+      const col=(...names)=>{ for(const n of names){ let idx=header.findIndex(h=>h===n); if(idx>=0) return idx; idx=header.findIndex(h=>h.includes(n)); if(idx>=0) return idx; } return -1; };
+      const ci={
+        unita:col("unita","unit"), cod:col("cod anag","codice anag","cod anagrafica"),
+        cognome:col("cognome"), nome:col("nome"), presso:col("presso","c/o"),
+        via:col("via"), cap:col("cap"), citta:col("citta","localita"), prov:col("prov"),
+        cf:col("cod fiscale","codice fiscale"),
+        tel1:col("tel 1","tel1","telefono"), tel2:col("tel 2","tel2"),
+        cell1:col("cell 1","cell1","cellulare"), cell2:col("cell 2","cell2"),
+        email1:col("email 1","email1","email","e-mail"), email2:col("email 2","email2"),
+        nasc:col("data nascita","nascita"),
+      };
+      if(ci.unita<0){ setErr("Colonna 'Unità' non trovata."); return; }
+      const val=(row,idx)=> idx>=0&&row[idx]!=null?String(row[idx]).trim():"";
+      const mese=String(new Date().getMonth()+1).padStart(2,"0");
+      const parsed=[];
+      for(let i=hi+1;i<aoa.length;i++){
+        const row=aoa[i]; if(!row||!row.length) continue;
+        const unita=val(row,ci.unita);
+        let cognome=val(row,ci.cognome), nome=val(row,ci.nome);
+        // "inq." è un'annotazione, non parte del nome
+        const clean=s=>s.replace(/\s*-?\s*inq\.?\s*$/i,"").replace(/\s+/g," ").trim();
+        cognome=clean(cognome); nome=clean(nome);
+        const nomeCompleto=(cognome+" "+nome).replace(/\s+/g," ").trim();
+        if(!unita&&!nomeCompleto) continue;
+        if(/totale|totali|generali/i.test(nomeCompleto)) continue;
+        if(!nomeCompleto) continue;
+        const primo=(cognome||nomeCompleto).split(/\s+/)[0]||"Inq";
+        const pw=primo.charAt(0).toUpperCase()+primo.slice(1,4).toLowerCase()+mese+"!";
+        parsed.push({
+          unita, interno:unita, cod:val(row,ci.cod), cognome, nome, nomeCompleto, chiaveNome:normNm(nomeCompleto),
+          presso:val(row,ci.presso), via:val(row,ci.via), cap:val(row,ci.cap),
+          localita:val(row,ci.citta), prov:val(row,ci.prov), cf:val(row,ci.cf),
+          telefono:val(row,ci.tel1), tel2:val(row,ci.tel2),
+          cell:val(row,ci.cell1), cell2:val(row,ci.cell2),
+          email:val(row,ci.email1), email2:val(row,ci.email2),
+          dataNasc:val(row,ci.nasc), password:pw,
+        });
+      }
+      if(!parsed.length){ setErr("Nessun inquilino trovato nel file."); return; }
+      setRows(parsed); setPreview(true);
+    }catch(e){ setErr("Errore lettura file: "+e.message); }
+  };
+
+  const doImport=async()=>{
+    if(!selCond){ setErr("Seleziona un condominio."); return; }
+    setImporting(true); setErr(""); setProgress(0);
+    const condo=condominii?.find(c=>String(c.id)===String(selCond));
+    let existing=[];
+    try{ existing=await GET("profiles","cond_id=eq."+selCond+"&role=eq.inquilino&select=id,interno,cod_anagrafica,name",tok)||[]; }catch(e){}
+    const byKey={};
+    existing.forEach(p=>{
+      const k1=normInt(p.interno)+"|c"+(p.cod_anagrafica||"");
+      const k2=normInt(p.interno)+"|n"+normNm(p.name);
+      if(p.cod_anagrafica&&!byKey[k1]) byKey[k1]=p;
+      if(!byKey[k2]) byKey[k2]=p;
+    });
+    const creati=[],aggiornati=[],noEmail=[],failed=[];
+    for(let i=0;i<rows.length;i++){
+      const r=rows[i]; setProgress(Math.round(((i+1)/rows.length)*100));
+      const anag={
+        name:r.nomeCompleto, cognome:r.cognome||null, nome:r.nome||null,
+        interno:r.interno||null, cod_anagrafica:r.cod||null,
+        presso:r.presso||null, via:r.via||null, cap:r.cap||null,
+        localita:r.localita||null, prov:r.prov||null,
+        telefono:r.telefono||null, telefono2:r.tel2||null,
+        cell:r.cell||null, cell2:r.cell2||null,
+        email2:isRealEmail(r.email2)?r.email2:null,
+        codice_fiscale:r.cf||null, data_nascita:r.dataNasc||null,
+      };
+      try{
+        const ex = (r.cod&&byKey[normInt(r.interno)+"|c"+r.cod]) || byKey[normInt(r.interno)+"|n"+r.chiaveNome];
+        if(ex){
+          await PATCH("profiles","id=eq."+ex.id,anag,tok);
+          aggiornati.push(r);
+        } else {
+          let uid, authId=null;
+          try{ const res=await createAuthUser(r.email||null,r.password); uid=res.id; }
+          catch(authErr){
+            const dup=await GET("profiles","email=eq."+encodeURIComponent(r.email||"")+"&select=id,auth_user_id&order=created_at",tok);
+            authId=(dup||[]).find(p=>p.auth_user_id&&p.auth_user_id!==p.id)?.auth_user_id||dup?.[0]?.auth_user_id||dup?.[0]?.id;
+            if(!authId) throw authErr;
+            const fake=(r.cognome||"inq").toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
+            uid=(await createAuthUser(fake,r.password)).id;
+          }
+          await POST("profiles",{id:uid,auth_user_id:authId||uid,role:"inquilino",cond_id:Number(selCond),
+            email:isRealEmail(r.email)?r.email:null, ...anag},tok);
+          if(isRealEmail(r.email)){
+            try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); creati.push(r); }
+            catch{ noEmail.push(r); }
+          } else noEmail.push(r);
+          await new Promise(res=>setTimeout(res,150));
+        }
+      }catch(e){ failed.push({...r,errore:e.message}); }
+    }
+    setResults({creati,aggiornati,noEmail,failed}); setImporting(false);
+  };
+
+  const perUnita={}; rows.forEach(r=>{ (perUnita[r.interno]=perUnita[r.interno]||[]).push(r); });
+  const unitaMulti=Object.values(perUnita).filter(a=>a.length>1).length;
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-2xl font-black text-gray-800">Import Inquilini</h2>
+        <p className="text-gray-400 text-sm mt-1">File "Elenco anagrafiche" dei soli inquilini. Ogni riga è un inquilino, agganciato alla sua unità dal numero Unità. Sono ammessi più inquilini sulla stessa unità. Reimportando lo stesso file gli inquilini esistenti vengono aggiornati (per unità + codice anagrafica), senza duplicati.</p>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-5">
+        <Sel label="Condominio di destinazione" value={selCond} onChange={e=>setSelCond(e.target.value)}>
+          {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome} · {c.citta}</option>)}
+        </Sel>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 mt-3">File Excel (.xlsx / .xls)</label>
+        <input type="file" accept=".xlsx,.xls" onChange={e=>e.target.files[0]&&parseExcel(e.target.files[0])} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
+      </div>
+      <ErrBox msg={err}/>
+      {preview&&rows.length>0&&!results&&(
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-5">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div>
+              <p className="font-bold text-gray-800">Anteprima — {rows.length} inquilini</p>
+              <p className="text-xs text-gray-400">
+                {rows.filter(r=>isRealEmail(r.email)).length} con email · {rows.filter(r=>r.cod).length} con codice · {unitaMulti} unità con più inquilini
+              </p>
+            </div>
+            <Btn onClick={doImport} disabled={importing}>{importing?`Importazione... ${progress}%`:"Importa / Aggiorna"}</Btn>
+          </div>
+          {importing&&<div className="h-1 bg-gray-100"><div className="h-1 bg-blue-500 transition-all" style={{width:`${progress}%`}}/></div>}
+          <div className="max-h-80 overflow-y-auto">
+            {rows.map((r,i)=>(
+              <div key={i} className={`px-5 py-3 ${i<rows.length-1?"border-b border-gray-50":""}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-800 text-sm">Int. {r.interno||"—"} · {r.nomeCompleto} {r.cod?<span className="text-xs text-gray-400">(cod. {r.cod})</span>:null}</p>
+                    <p className="text-xs text-gray-400">{r.email||"⚠ nessuna email"}{perUnita[r.interno].length>1?` · unità con ${perUnita[r.interno].length} inquilini`:""}</p>
+                  </div>
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-mono shrink-0 ml-3">{r.password}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {results&&(
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <p className="font-bold text-gray-800 mb-3">Importazione completata</p>
+          <p className="text-sm text-emerald-600 mb-1">✅ {results.creati.length} nuovi inquilini (email di benvenuto inviata)</p>
+          <p className="text-sm text-blue-600 mb-1">🔁 {results.aggiornati.length} aggiornati (già presenti)</p>
+          <p className="text-sm text-amber-600 mb-1">⚠️ {results.noEmail.length} nuovi senza email</p>
+          {results.failed.length>0&&<><p className="text-sm text-red-600 mb-1">❌ {results.failed.length} errori</p>{results.failed.map((r,i)=><p key={i} className="text-xs text-red-500">Int. {r.interno} {r.nomeCompleto}: {r.errore}</p>)}</>}
+          <div className="flex gap-3 mt-4">
             <Btn variant="secondary" onClick={()=>{setResults(null);setPreview(false);setRows([]);}}>Nuova importazione</Btn>
           </div>
         </div>
