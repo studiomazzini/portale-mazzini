@@ -54,11 +54,11 @@ async function getSignedUrl(bucket, filePath, token) {
 
 // ── Email ─────────────────────────────────────────────────────────────────────
 const MAIL_FROM = "Portale Condominiale <portale@studiomazzinibo.com>";
-const sendEmail = async(to, subject, html) => {
+const sendEmail = async(to, subject, html, attachments) => {
   const r = await fetch("/.netlify/functions/send-email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, subject, html })
+    body: JSON.stringify({ to, subject, html, attachments })
   });
   if (!r.ok) throw new Error("Errore invio email");
 };
@@ -96,22 +96,26 @@ async function notifyPersonalDoc(userId, docName, cat, tok) {
         ${mailFooter}</div>`);
   }catch(e){console.error("Notifica errore:",e);}
 }
-async function notifySegnalazione(segn, userName, condoNome, interno, adminEmail) {
+async function notifySegnalazione(segn, userName, condoNome, interno, adminEmail, attachments) {
   if(!adminEmail) return;
   try {
     const col = segn.urgenza==="urgente"?"#e53e3e":"#2d3748";
-    await sendEmail([adminEmail],`🚨 Nuova segnalazione — ${userName} — ${condoNome}`,
+    const allegHtml = (attachments&&attachments.length)
+      ? `<div style="background:#eef2ff;padding:10px;border-radius:8px;margin-top:10px"><strong>Allegati (${attachments.length}):</strong> ${attachments.map(a=>a.filename).join(", ")}</div>`
+      : "";
+    await sendEmail([adminEmail],`\u{1F6A8} Nuova segnalazione \u2014 ${userName} \u2014 ${condoNome}`,
       `<div style="font-family:sans-serif;max-width:500px;margin:0 auto">
         <h2 style="color:#e53e3e">Nuova Segnalazione</h2>
         <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
-          <tr><td style="padding:8px;font-weight:bold;background:#f7fafc">Condomino</td><td style="padding:8px">${userName} · Int. ${interno}</td></tr>
+          <tr><td style="padding:8px;font-weight:bold;background:#f7fafc">Condomino</td><td style="padding:8px">${userName} \u00b7 Int. ${interno}</td></tr>
           <tr><td style="padding:8px;font-weight:bold;background:#f7fafc">Condominio</td><td style="padding:8px">${condoNome}</td></tr>
           <tr><td style="padding:8px;font-weight:bold;background:#f7fafc">Tipo</td><td style="padding:8px">${segn.tipo}</td></tr>
           <tr><td style="padding:8px;font-weight:bold;background:#f7fafc">Urgenza</td><td style="padding:8px;color:${col};font-weight:bold">${segn.urgenza.toUpperCase()}</td></tr>
         </table>
         <div style="background:#f7fafc;padding:12px;border-radius:8px"><strong>Descrizione:</strong><br>${segn.descrizione}</div>
+        ${allegHtml}
         <p style="color:#718096;font-size:12px">Ricevuta il ${new Date().toLocaleDateString("it-IT")} alle ${new Date().toLocaleTimeString("it-IT")}</p>
-      </div>`);
+      </div>`, attachments);
   }catch(e){console.error("Notifica errore:",e);}
 }
 async function sendWelcomeEmail(email, nome, password, condoNome) {
@@ -2505,6 +2509,16 @@ function AdminSegnalazioni({tok}) {
             {expanded===s.id&&(
               <div className="px-4 pb-4 bg-gray-50">
                 <p className="text-sm text-gray-700 mb-3">{s.descrizione}</p>
+                {Array.isArray(s.allegati)&&s.allegati.length>0&&(
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Allegati ({s.allegati.length})</p>
+                    <div className="flex flex-wrap gap-2">
+                      {s.allegati.map((a,j)=>(
+                        <button key={j} onClick={async()=>{try{const u=await getSignedUrl("segnalazioni",a.path,tok);window.open(u,"_blank");}catch(e){alert(e.message);}}} className="text-xs bg-white border border-gray-200 rounded-lg px-2 py-1 hover:bg-gray-100">📎 {a.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   {s.stato!=="aperta"&&<Btn variant="danger" onClick={()=>updateStato(s.id,"aperta")}>Riapri</Btn>}
                   {s.stato!=="in_lavorazione"&&<Btn variant="warning" onClick={()=>updateStato(s.id,"in_lavorazione")}>In lavorazione</Btn>}
@@ -3225,15 +3239,31 @@ function CondSegnalazioni({user}) {
   const {data:list,loading,reload}=useData(()=>GET("segnalazioni",`user_id=eq.${user.id}&select=*&order=created_at.desc`,user.token),[user.token,user.id]);
   const [form,setForm]=useState({tipo:"",descrizione:"",urgenza:"normale"});
   const [sending,setSending]=useState(false); const [sent,setSent]=useState(false);
+  const [files,setFiles]=useState([]);
   const s=(k,v)=>setForm(p=>({...p,[k]:v}));
   const submit=async()=>{
     if(!form.tipo||!form.descrizione){alert("Compila tutti i campi."); return;}
+    if(files.length>5){alert("Massimo 5 allegati per segnalazione."); return;}
+    for(const f of files){ if(f.size>10*1024*1024){alert("Ogni allegato puo' essere al massimo 10 MB: "+f.name); return;} }
     setSending(true);
     try{
-      await POST("segnalazioni",{user_id:user.id,cond_id:user.cond_id,...form},user.token);
+      const res=await POST("segnalazioni",{user_id:user.id,cond_id:user.cond_id,...form},user.token);
+      const segId=res?.[0]?.id;
+      const allegati=[];
+      if(segId&&files.length){
+        for(const f of files){
+          const safe=f.name.replace(/[^\w.\-]+/g,"_");
+          const pathF=segId+"/"+Date.now()+"_"+safe;
+          await uploadFile("segnalazioni",pathF,f,user.token);
+          allegati.push({name:f.name,path:pathF,size:f.size,type:f.type});
+        }
+        await PATCH("segnalazioni","id=eq."+segId,{allegati},user.token);
+      }
       const contatti=(await GET("contatti","id=eq.1",user.token))?.[0];
-      await notifySegnalazione(form,user.name,user.condominii?.nome,user.interno,contatti?.email);
-      setForm({tipo:"",descrizione:"",urgenza:"normale"});
+      const attachments=[];
+      for(const al of allegati){ try{ const url=await getSignedUrl("segnalazioni",al.path,user.token); attachments.push({filename:al.name,path:url}); }catch(e){} }
+      await notifySegnalazione(form,user.name,user.condominii?.nome,user.interno,contatti?.email,attachments);
+      setForm({tipo:"",descrizione:"",urgenza:"normale"}); setFiles([]);
       setSent(true); setTimeout(()=>setSent(false),3000); reload();
     }catch(e){alert(e.message);}
     setSending(false);
@@ -3257,6 +3287,11 @@ function CondSegnalazioni({user}) {
           <option value="normale">Normale</option>
           <option value="urgente">⚠️ Urgente</option>
         </Sel>
+        <div className="mb-3">
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Allegati (foto o PDF · max 5 file, 10 MB ciascuno)</label>
+          <input type="file" multiple accept="image/*,application/pdf" onChange={e=>setFiles(Array.from(e.target.files||[]))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50"/>
+          {files.length>0&&<p className="text-xs text-gray-400 mt-1">{files.length} file selezionati: {files.map(f=>f.name).join(", ")}</p>}
+        </div>
         {sent&&<div className="bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm rounded-xl px-3 py-2 mb-3">✓ Segnalazione inviata! Lo studio la contatterà al più presto.</div>}
         <Btn onClick={submit} disabled={sending||!form.tipo||!form.descrizione}>{sending?"Invio in corso...":"🚨 Invia segnalazione"}</Btn>
       </div>
