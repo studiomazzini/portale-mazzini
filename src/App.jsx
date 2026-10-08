@@ -2148,7 +2148,10 @@ function AdminDocumenti({tok}) {
               <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-lg">📄</div>
               <div><p className="font-medium text-gray-800 text-sm">{d.name}</p><div className="flex items-center gap-2 mt-1"><Badge cat={d.cat}/><span className="text-xs text-gray-400">{d.year} · {d.size}</span></div></div>
             </div>
-            <Btn variant="danger" onClick={()=>remove(d.id)}>Elimina</Btn>
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={async()=>{try{const u=await getSignedUrl(tipo==="cond"?"docs-condominiali":"docs-personali",d.storage_path,tok);window.open(u,"_blank");}catch(e){alert(e.message);}}}>Scarica</Btn>
+              <Btn variant="danger" onClick={()=>remove(d.id)}>Elimina</Btn>
+            </div>
           </div>
         ))}
       </div>
@@ -2185,7 +2188,10 @@ function AdminGeneralDocs({tok}) {
               <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-lg">📋</div>
               <div><p className="font-medium text-gray-800 text-sm">{d.name}</p><div className="flex items-center gap-2 mt-1"><Badge cat={d.cat}/><span className="text-xs text-gray-400">{d.year} · {d.size}</span></div></div>
             </div>
-            <Btn variant="danger" onClick={()=>remove(d.id)}>Elimina</Btn>
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={async()=>{try{const u=await getSignedUrl("docs-generali",d.storage_path,tok);window.open(u,"_blank");}catch(e){alert(e.message);}}}>Scarica</Btn>
+              <Btn variant="danger" onClick={()=>remove(d.id)}>Elimina</Btn>
+            </div>
           </div>
         ))}
       </div>
