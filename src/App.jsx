@@ -62,6 +62,30 @@ const sendEmail = async(to, subject, html, attachments) => {
   });
   if (!r.ok) throw new Error("Errore invio email");
 };
+
+// ── Notifiche push ────────────────────────────────────────────────────────────
+const VAPID_PUBLIC_KEY = "BKVLlkVo_Q3DBGZnXnyaU6mDcdEPwV0_CED99gIIgwYqdnxx8AiySmpkjwBrAGdL09AkbORzhW_VsrOXFM7AcFY";
+function urlB64ToUint8Array(b64){ const pad="=".repeat((4-b64.length%4)%4); const base=(b64+pad).replace(/-/g,"+").replace(/_/g,"/"); const raw=atob(base); const out=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i); return out; }
+async function sendPush(target, title, body, url){
+  try{
+    const payload={title,body,url:url||"/"};
+    if(Array.isArray(target)) payload.userIds=target.filter(Boolean);
+    else if(target&&target.role) payload.role=target.role;
+    if(!((payload.userIds&&payload.userIds.length)||payload.role)) return;
+    await fetch("/.netlify/functions/send-push",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  }catch(e){ console.error("Push errore:",e); }
+}
+async function attivaNotifiche(user){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window))
+    throw new Error("Questo dispositivo non supporta le notifiche. Su iPhone installa prima l'app dalla schermata Home e aprila da lì.");
+  const perm=await Notification.requestPermission();
+  if(perm!=="granted") throw new Error("Permesso negato. Puoi riattivarlo dalle impostazioni del telefono.");
+  const reg=await navigator.serviceWorker.ready;
+  let sub=await reg.pushManager.getSubscription();
+  if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8Array(VAPID_PUBLIC_KEY)});
+  const j=sub.toJSON();
+  await sb("/rest/v1/push_subscriptions?on_conflict=endpoint",{method:"POST",body:{user_id:user.id,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth},prefer:"return=minimal,resolution=merge-duplicates",token:user.token});
+}
 const mailFooter = `<p style="color:#64748b;font-size:12px;margin-top:16px">Studio Amministrazioni Immobiliari s.a.s. di Mazzini & C.<br><a href="https://studiomazzinibo.com">studiomazzinibo.com</a></p>`;
 const catText = c => ({consuntivi:"un nuovo consuntivo",preventivi:"un nuovo preventivo con piano rate",verbali:"un nuovo verbale di assemblea",altro:"un nuovo documento"}[c]||"un nuovo documento");
 
@@ -80,10 +104,12 @@ async function notifyCondoDoc(condId, docName, cat, tok) {
           <p style="background:#f1f5f9;padding:12px;border-radius:8px">📄 <strong>${docName}</strong></p>
           ${mailFooter}</div>`);
     }
+    try{ const ids=(await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=id`,tok)||[]).map(u=>u.id); await sendPush(ids,(condo?.nome||"Portale")+" \u2014 nuovo documento","\uD83D\uDCC4 "+docName,"/"); }catch(_){}
   }catch(e){console.error("Notifica errore:",e);}
 }
 async function notifyPersonalDoc(userId, docName, cat, tok) {
   try {
+    try{ await sendPush([userId],"Nuovo documento personale","\uD83D\uDCC4 "+docName,"/"); }catch(_){}
     const u = (await GET("profiles",`id=eq.${userId}&select=name,email,email2`,tok))?.[0];
     const emails=[u?.email,u?.email2].filter(e=>isRealEmail(e));
     if(!emails.length) return;
@@ -100,6 +126,7 @@ async function notifySegnalazione(segn, userName, condoNome, interno, adminEmail
   if(!adminEmail) return;
   try {
     const col = segn.urgenza==="urgente"?"#e53e3e":"#2d3748";
+    try{ await sendPush({role:"admin"},"\uD83D\uDEA8 Nuova segnalazione",userName+" \u2014 "+segn.tipo,"/"); }catch(_){}
     const allegHtml = (attachments&&attachments.length)
       ? `<div style="background:#eef2ff;padding:10px;border-radius:8px;margin-top:10px"><strong>Allegati (${attachments.length}):</strong> ${attachments.map(a=>a.filename).join(", ")}</div>`
       : "";
@@ -895,6 +922,7 @@ function AdminPanel({user,onLogout,view,setView}) {
     {id:"avvisi",      label:"Avvisi",            icon:"📢"},
     {id:"segnalazioni",label:"Segnalazioni",     icon:"🚨"},
     {id:"contatti",    label:"Contatti Studio",  icon:"📞"},
+    {id:"notifiche",   label:"Notifiche",        icon:"🔔"},
   ];
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -913,6 +941,7 @@ function AdminPanel({user,onLogout,view,setView}) {
           {view==="avvisi"       && <AdminAvvisi tok={user.token}/>}
           {view==="segnalazioni" && <AdminSegnalazioni tok={user.token}/>}
           {view==="contatti"     && <AdminContatti tok={user.token}/>}
+          {view==="notifiche"    && <div><h2 className="text-2xl font-black text-gray-800 mb-2">Notifiche push</h2><p className="text-gray-400 text-sm mb-5">Attiva le notifiche su questo dispositivo per ricevere avvisi sulle nuove segnalazioni.</p><NotifichePush user={user}/></div>}
         </div>
       </div>
     </div>
@@ -2407,6 +2436,7 @@ function AvvisoModal({condominii,selCond,tok,onClose}) {
       const storagePath="avvisi/"+cond+"/"+Date.now()+"."+ext;
       await uploadFile("avvisi",storagePath,file,tok);
       await POST("avvisi",{titolo,tipo,solo_proprietari:soloProprietari,cond_id:Number(cond),storage_path:storagePath,nome_file:file.name},tok);
+      try{ const q="cond_id=eq."+cond+(soloProprietari?"&role=eq.condomino":"&role=in.(condomino,inquilino)")+"&select=id"; const ids=(await GET("profiles",q,tok)||[]).map(u=>u.id); await sendPush(ids,"Nuovo avviso","\uD83D\uDCE2 "+titolo,"/"); }catch(_){}
       onClose();
     }catch(e){alert(e.message);}
     setSaving(false);
@@ -2644,6 +2674,27 @@ function CondProfilo({user, setUser}) {
   );
 }
 
+function NotifichePush({user}){
+  const [stato,setStato]=useState("idle"); const [msg,setMsg]=useState("");
+  const supportato = typeof window!=="undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  useEffect(()=>{ if(supportato && Notification.permission==="granted"){ (async()=>{ try{ const r=await navigator.serviceWorker.ready; const s=await r.pushManager.getSubscription(); if(s) setStato("attivo"); }catch(e){} })(); } },[]);
+  const attiva=async()=>{ setStato("loading"); setMsg(""); try{ await attivaNotifiche(user); setStato("attivo"); setMsg("Notifiche attivate su questo dispositivo."); }catch(e){ setStato("idle"); setMsg(e.message); } };
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+      <h3 className="font-bold text-gray-700 mb-1">🔔 Notifiche push</h3>
+      <p className="text-sm text-gray-500 mb-3">Ricevi un avviso sul telefono per nuovi documenti, avvisi e promemoria rate.</p>
+      {!supportato ? (
+        <p className="text-sm text-amber-600">Per ricevere le notifiche su iPhone, aggiungi prima l'app alla schermata Home (Condividi → Aggiungi a Home) e aprila da lì.</p>
+      ) : stato==="attivo" ? (
+        <p className="text-sm text-emerald-600 font-semibold">✓ Notifiche attive su questo dispositivo.</p>
+      ) : (
+        <Btn onClick={attiva} disabled={stato==="loading"}>{stato==="loading"?"Attivazione...":"Attiva le notifiche"}</Btn>
+      )}
+      {msg&&<p className="text-xs text-gray-400 mt-2">{msg}</p>}
+    </div>
+  );
+}
+
 function CondAccount({user,onLogout}) {
   const [loading,setLoading]=useState(false);
   const deactivate=async()=>{
@@ -2683,6 +2734,7 @@ function CondAccount({user,onLogout}) {
         {user.telefono2&&<p className="text-sm text-gray-600">Telefono 2: <strong>{user.telefono2}</strong></p>}
         <p className="text-sm text-gray-600">Condominio: <strong>{user.condominii?.nome}</strong> · Int. {user.interno}</p>
       </div>
+      <NotifichePush user={user}/>
       <div className="bg-red-50 border border-red-100 rounded-2xl p-6">
         <h3 className="font-bold text-red-700 mb-2">⚠️ Zona pericolosa</h3>
         <p className="text-sm text-red-600 mb-4">Disattivando il tuo account i tuoi <strong>documenti personali verranno eliminati</strong>. I tuoi dati di contatto rimarranno nel sistema e potrai essere riattivato dall'amministratore.</p>
