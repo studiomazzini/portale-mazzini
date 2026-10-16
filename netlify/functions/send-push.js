@@ -3,9 +3,20 @@ const webpush = require("web-push");
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
   try {
-    const { userIds, title, body, url } = JSON.parse(event.body);
-    if (!Array.isArray(userIds) || !userIds.length)
-      return { statusCode: 400, body: JSON.stringify({ error: "userIds mancanti" }) };
+    const { userIds, role, title, body, url } = JSON.parse(event.body);
+
+    const SB_URL = process.env.VITE_SUPABASE_URL;
+    const SVC = process.env.VITE_SUPABASE_SERVICE_KEY;
+    const H = { apikey: SVC, Authorization: `Bearer ${SVC}` };
+
+    let ids = Array.isArray(userIds) ? userIds.slice() : [];
+    if (role) {
+      const rr = await fetch(`${SB_URL}/rest/v1/profiles?role=eq.${encodeURIComponent(role)}&select=id`, { headers: H });
+      const rows = await rr.json();
+      ids = ids.concat((Array.isArray(rows) ? rows : []).map((r) => r.id));
+    }
+    ids = [...new Set(ids.filter(Boolean))];
+    if (!ids.length) return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sent: 0, removed: 0 }) };
 
     webpush.setVapidDetails(
       "mailto:studiomazzinibo@gmail.com",
@@ -13,12 +24,8 @@ exports.handler = async (event) => {
       process.env.VAPID_PRIVATE_KEY
     );
 
-    const SB_URL = process.env.VITE_SUPABASE_URL;
-    const SVC = process.env.VITE_SUPABASE_SERVICE_KEY;
-    const inList = userIds.map((u) => `"${u}"`).join(",");
-    const r = await fetch(`${SB_URL}/rest/v1/push_subscriptions?user_id=in.(${inList})&select=*`, {
-      headers: { apikey: SVC, Authorization: `Bearer ${SVC}` }
-    });
+    const inList = ids.map((u) => `"${u}"`).join(",");
+    const r = await fetch(`${SB_URL}/rest/v1/push_subscriptions?user_id=in.(${inList})&select=*`, { headers: H });
     const subs = await r.json();
     const payload = JSON.stringify({ title: title || "Portale Mazzini", body: body || "", url: url || "/" });
 
@@ -32,9 +39,7 @@ exports.handler = async (event) => {
       }
     }));
     for (const ep of gone) {
-      await fetch(`${SB_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(ep)}`, {
-        method: "DELETE", headers: { apikey: SVC, Authorization: `Bearer ${SVC}` }
-      });
+      await fetch(`${SB_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(ep)}`, { method: "DELETE", headers: H });
     }
     return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sent, removed: gone.length }) };
   } catch (e) {
