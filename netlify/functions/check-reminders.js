@@ -44,13 +44,15 @@ exports.handler = async (event) => {
     const isReal = e => e && !e.includes('@noemail.local');
 
     let inviati = 0;
+    const notifiedPush = new Set();
     for (const imp of importi) {
       const p = profiloMap[imp.user_id];
       if (!p) continue;
+
+      const scad = rataDateMap[imp.rata_id] || '';
       const emails = [p.email, p.email2].filter(isReal);
       if (!emails.length) continue;
 
-      const scad = rataDateMap[imp.rata_id] || '';
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + RESEND },
@@ -73,10 +75,31 @@ exports.handler = async (event) => {
           headers: { ...h, 'Prefer': 'return=minimal' },
           body: JSON.stringify({ notificato: true })
         });
+        notifiedPush.add(imp.user_id);
       }
     }
 
-    return { statusCode: 200, body: JSON.stringify({ inviati, totale: importi.length }) };
+    // Invio notifiche push ai condomini con una rata in scadenza
+    let push = 0;
+    if (notifiedPush.size) {
+      try {
+        const base = process.env.URL || 'https://studiomazzinibo.com';
+        const pr = await fetch(base + '/.netlify/functions/send-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userIds: [...notifiedPush],
+            title: 'Promemoria rata',
+            body: 'Hai una rata condominiale in scadenza a breve.',
+            url: '/'
+          })
+        });
+        const pd = await pr.json().catch(() => ({}));
+        push = pd && pd.sent ? pd.sent : 0;
+      } catch (e) { /* push best-effort */ }
+    }
+
+    return { statusCode: 200, body: JSON.stringify({ inviati, push, totale: importi.length }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ errore: err.message }) };
   }
