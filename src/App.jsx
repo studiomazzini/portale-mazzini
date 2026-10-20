@@ -675,7 +675,7 @@ function AdminPagamenti({tok}) {
       const perCod={}; conds.forEach(c=>{ if(c.codice!=null&&String(c.codice).trim()!=="") perCod[normCod(c.codice)]=c; });
       const condIds=[...new Set(rows.map(r=>perCod[r.codice]?.id).filter(Boolean))];
       const ppc={};
-      for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,interno,cond_id,role&order=name",tok)||[];
+      for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,interno,cond_id,role&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
 
       // Abbinamento per ruolo: PROP/USUF -> proprietario per unita; INQU -> inquilino per unita+nome; EX* ignorati.
       const out=rows.map(r=>{
@@ -1111,7 +1111,7 @@ function InlineInquilini({condId,tok}) {
   const load=async()=>{
     setLoading(true);
     try{
-      const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=name",tok)||[];
+      const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
       setUsers(us);
       if(us.length){
         const ids=us.map(u=>u.id).join(",");
@@ -1200,7 +1200,7 @@ function AdminUtenti({tok}) {
   const load=useCallback(async()=>{
     setLoading(true); setErr("");
     try{
-      let qs=(filtroRuolo?"role=eq."+filtroRuolo:"role=neq.admin")+"&select=*,condominii(nome,citta)&order=name&limit="+(PS+1)+"&offset="+(page*PS);
+      let qs=(filtroRuolo?"role=eq."+filtroRuolo:"role=neq.admin")+"&select=*,condominii(nome,citta)&order=cognome.asc.nullslast,nome.asc.nullslast&limit="+(PS+1)+"&offset="+(page*PS);
       if(search) qs+=`&or=(name.ilike.*${encodeURIComponent(search)}*,email.ilike.*${encodeURIComponent(search)}*)`;
       if(filterCond) qs+=`&cond_id=eq.${filterCond}`;
       const d=await GET("profiles",qs,tok);
@@ -1850,7 +1850,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
       if(!parsed.length){ setErr("Nessuna riga valida trovata."); return; }
 
       // carica profili e abbina per ruolo
-      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=neq.admin&select=id,interno,name,role&order=name",{headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
+      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=neq.admin&select=id,interno,name,role&order=cognome.asc.nullslast,nome.asc.nullslast",{headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
       const prof=await res.json()||[];
       const abbina=r=>{
         const ui=normInt(r.unit); const n=normNome(r.name); const tt=tokNome(r.name);
@@ -1954,7 +1954,7 @@ function BulkImportiModal({condId,rate,tok,onClose}) {
     (async()=>{
       setLoading(true);
       try{
-        const us=await GET("profiles","cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=name",tok)||[];
+        const us=await GET("profiles","cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
         setUsers(us);
         const existing={};
         if(us.length){
@@ -2032,7 +2032,7 @@ function ImportImportiModal({rata,condId,tok,onClose}) {
       const XLSX=await import("https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs");
       const buf=await file.arrayBuffer(); const wb=XLSX.read(buf); const ws=wb.Sheets[wb.SheetNames[0]];
       const data=XLSX.utils.sheet_to_json(ws,{defval:""});
-      const users=await GET("profiles",`cond_id=eq.${condId}&role=in.(condomino,inquilino)&select=id,name,interno&order=name`,tok)||[];
+      const users=await GET("profiles",`cond_id=eq.${condId}&role=in.(condomino,inquilino)&select=id,name,interno&order=cognome.asc.nullslast,nome.asc.nullslast`,tok)||[];
       const parsed=[];
       for(const row of data){
         const nome=String(row["Nome"]||row["NOME"]||row["Cognome"]||"").trim();
@@ -2133,7 +2133,7 @@ function AdminDocumenti({tok}) {
   const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false); const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
   useEffect(()=>{ if(selCond) localStorage.setItem('adminSelCond',selCond); },[selCond]);
-  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=name`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
+  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
   useEffect(()=>{loadDocs();},[tipo,selCond,selUid,tok]);
   const loadDocs=async()=>{
     if(!selCond) return; setLoading(true);
