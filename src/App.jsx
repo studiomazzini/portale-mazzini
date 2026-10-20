@@ -1192,6 +1192,7 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
   );
 }
 
+const nomeCognome = u => { const cg=(u&&u.cognome||"").trim(), nm=(u&&u.nome||"").trim(); return (cg||nm) ? (cg+" "+nm).trim() : ((u&&u.name)||""); };
 function AdminUtenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
@@ -1301,7 +1302,7 @@ function AdminUtenti({tok}) {
             <div className="flex items-center gap-3">
               <div className={"w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm "+(u.role==="inquilino"?"bg-blue-100 text-blue-600":"bg-emerald-100 text-emerald-600")}>{u.name?.charAt(0)}</div>
               <div>
-                <div className="flex items-center gap-2"><p className="font-semibold text-gray-800 text-sm">{u.name}</p><StatoUtente s={u.stato}/><RiepRateBadge r={riepRate[u.id]}/></div>
+                <div className="flex items-center gap-2"><p className="font-semibold text-gray-800 text-sm">{nomeCognome(u)}</p><StatoUtente s={u.stato}/><RiepRateBadge r={riepRate[u.id]}/></div>
                 <p className="text-xs text-gray-400">{u.condominii?.nome} · Int.{u.interno}</p>
               </div>
             </div>
