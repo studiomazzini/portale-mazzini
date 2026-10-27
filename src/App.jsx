@@ -675,7 +675,7 @@ function AdminPagamenti({tok}) {
       const perCod={}; conds.forEach(c=>{ if(c.codice!=null&&String(c.codice).trim()!=="") perCod[normCod(c.codice)]=c; });
       const condIds=[...new Set(rows.map(r=>perCod[r.codice]?.id).filter(Boolean))];
       const ppc={};
-      for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,interno,cond_id,role&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
+      for(const cid of condIds) ppc[cid]=await GET("profiles","cond_id=eq."+cid+"&role=neq.admin&select=id,name,cognome,nome,interno,cond_id,role&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
 
       // Abbinamento per ruolo: PROP/USUF -> proprietario per unita; INQU -> inquilino per unita+nome; EX* ignorati.
       const out=rows.map(r=>{
@@ -793,7 +793,7 @@ function AdminPagamenti({tok}) {
                         <select value={r.userId} onChange={e=>setUser(i,e.target.value)}
                           className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50 max-w-xs">
                           <option value="">— non registrare —</option>
-                          {(profPerCond[r.condId]||[]).map(p=><option key={p.id} value={p.id}>{p.name} · Int.{p.interno||"—"}{p.role==="inquilino"?" (inq.)":""}</option>)}
+                          {(profPerCond[r.condId]||[]).map(p=><option key={p.id} value={p.id}>{nomeCognome(p)} · Int.{p.interno||"—"}{p.role==="inquilino"?" (inq.)":""}</option>)}
                         </select>
                       ):<span className="text-xs text-gray-400">—</span>}
                     </td>
@@ -1111,7 +1111,7 @@ function InlineInquilini({condId,tok}) {
   const load=async()=>{
     setLoading(true);
     try{
-      const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
+      const us=await GET("profiles","cond_id=eq."+condId+"&role=eq.condomino&select=id,name,cognome,nome,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
       setUsers(us);
       if(us.length){
         const ids=us.map(u=>u.id).join(",");
@@ -1136,7 +1136,7 @@ function InlineInquilini({condId,tok}) {
       {users.map(u=>(
         <div key={u.id} className="mb-4 last:mb-0">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-semibold text-gray-700">Int. {u.interno} — {u.name}</span>
+            <span className="text-sm font-semibold text-gray-700">Int. {u.interno} — {nomeCognome(u)}</span>
             <Btn variant="secondary" onClick={()=>setModal({mode:"add",data:{user_id:u.id,nome:"",email:"",tel:"",dal:"",al:""}})}>+ Inquilino</Btn>
           </div>
           {(inqMap[u.id]||[]).length===0&&<p className="text-xs text-gray-400 ml-2 mb-1">Nessun inquilino.</p>}
@@ -1851,7 +1851,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
       if(!parsed.length){ setErr("Nessuna riga valida trovata."); return; }
 
       // carica profili e abbina per ruolo
-      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=neq.admin&select=id,interno,name,role&order=cognome.asc.nullslast,nome.asc.nullslast",{headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
+      const res=await fetch(SBU+"/rest/v1/profiles?cond_id=eq."+condId+"&role=neq.admin&select=id,interno,name,cognome,nome,role&order=cognome.asc.nullslast,nome.asc.nullslast",{headers:{apikey:SBK,"Authorization":"Bearer "+tok}});
       const prof=await res.json()||[];
       const abbina=r=>{
         const ui=normInt(r.unit); const n=normNome(r.name); const tt=tokNome(r.name);
@@ -1930,7 +1930,7 @@ function ImportRateExcelModal({condId, tok, onClose}) {
                 {!r.userId&&(
                   <select value={r.userId} onChange={e=>setUser(i,e.target.value)} className="mt-1 w-full border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50">
                     <option value="">— non importare —</option>
-                    {profili.filter(p=> r.isInq? p.role==="inquilino" : p.role!=="inquilino").map(p=><option key={p.id} value={p.id}>{p.name} · Int.{p.interno||"—"}{p.role==="inquilino"?" (inq.)":""}</option>)}
+                    {profili.filter(p=> r.isInq? p.role==="inquilino" : p.role!=="inquilino").map(p=><option key={p.id} value={p.id}>{nomeCognome(p)} · Int.{p.interno||"—"}{p.role==="inquilino"?" (inq.)":""}</option>)}
                   </select>
                 )}
               </div>
@@ -1955,7 +1955,7 @@ function BulkImportiModal({condId,rate,tok,onClose}) {
     (async()=>{
       setLoading(true);
       try{
-        const us=await GET("profiles","cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
+        const us=await GET("profiles","cond_id=eq."+condId+"&role=in.(condomino,inquilino)&select=id,name,cognome,nome,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast",tok)||[];
         setUsers(us);
         const existing={};
         if(us.length){
@@ -2002,7 +2002,7 @@ function BulkImportiModal({condId,rate,tok,onClose}) {
               <tbody>
                 {users.map(u=>(
                   <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-2 pr-4 text-gray-800 text-sm font-medium whitespace-nowrap">Int.{u.interno} {u.name}</td>
+                    <td className="py-2 pr-4 text-gray-800 text-sm font-medium whitespace-nowrap">Int.{u.interno} {nomeCognome(u)}</td>
                     {rate.map(r=>(
                       <td key={r.id} className="py-1 px-1 text-center">
                         <input type="text" value={vals[r.id+":"+u.id]||""} onChange={e=>setVal(r.id,u.id,e.target.value)}
@@ -2134,7 +2134,7 @@ function AdminDocumenti({tok}) {
   const [users,setUsers]=useState([]); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(false); const [modal,setModal]=useState(false);
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
   useEffect(()=>{ if(selCond) localStorage.setItem('adminSelCond',selCond); },[selCond]);
-  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=in.(condomino,inquilino)&select=id,name,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
+  useEffect(()=>{ if(!selCond) return; GET("profiles",`cond_id=eq.${selCond}&role=in.(condomino,inquilino)&select=id,name,cognome,nome,scala,interno&order=cognome.asc.nullslast,nome.asc.nullslast`,tok).then(d=>{setUsers(d||[]);setSelUid(d?.[0]?.id||"");}); },[selCond,tok]);
   useEffect(()=>{loadDocs();},[tipo,selCond,selUid,tok]);
   const loadDocs=async()=>{
     if(!selCond) return; setLoading(true);
@@ -2172,7 +2172,7 @@ function AdminDocumenti({tok}) {
         </select>
         {tipo==="personal"&&<select className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1" value={selUid} onChange={e=>setSelUid(e.target.value)}>
           <option value="">— Seleziona condomino —</option>
-          {users.map(u=><option key={u.id} value={u.id}>{u.name} · Int.{u.interno}</option>)}
+          {users.map(u=><option key={u.id} value={u.id}>{nomeCognome(u)} · Int.{u.interno}</option>)}
         </select>}
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -2260,11 +2260,11 @@ function AdminScadenze({tok}) {
         const uids=[...new Set(Array.isArray(imp)?imp.map(i=>i.user_id).filter(Boolean):[])];
         let profMap={};
         if(uids.length){
-          const r3=await fetch(SBU+"/rest/v1/profiles?select=id,name,email&id=in.("+uids.join(",")+")",{headers:hdrAdmin});
+          const r3=await fetch(SBU+"/rest/v1/profiles?select=id,name,cognome,nome,email&id=in.("+uids.join(",")+")",{headers:hdrAdmin});
           const profs=await r3.json()||[];
           if(Array.isArray(profs)) profs.forEach(p=>{profMap[p.id]=p;});
         }
-        const impConProf=Array.isArray(imp)?imp.map(i=>({...i,profiles:profMap[i.user_id]||null})):[];
+        const impConProf=(Array.isArray(imp)?imp.map(i=>({...i,profiles:profMap[i.user_id]||null})):[]).sort((a,b)=>String((a.profiles&&(a.profiles.cognome||a.profiles.name))||"").localeCompare(String((b.profiles&&(b.profiles.cognome||b.profiles.name))||""),"it"));
         setRighe(rate.map(r=>({...r,importi:impConProf.filter(i=>i.rata_id===r.id)})));
     }catch(e){console.error(e);}
     setLoading(false);
@@ -2344,7 +2344,7 @@ function AdminScadenze({tok}) {
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-sm font-bold text-gray-600">{imp.profiles?.name?.charAt(0)||"?"}</div>
                       <div>
-                        <p className="text-sm font-medium text-gray-800">{imp.profiles?.name||"—"}</p>
+                        <p className="text-sm font-medium text-gray-800">{nomeCognome(imp.profiles)||"—"}</p>
                         <p className="text-xs text-gray-400">{haEmail?imp.profiles.email:"nessuna email"} · <strong>EUR {imp.importo}</strong></p>
                       </div>
                     </div>
