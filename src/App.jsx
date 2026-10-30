@@ -91,7 +91,7 @@ const catText = c => ({consuntivi:"un nuovo consuntivo",preventivi:"un nuovo pre
 
 async function notifyCondoDoc(condId, docName, cat, tok) {
   try {
-    const users = await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=name,email,email2`,tok);
+    const users = await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&or=(stato.is.null,stato.neq.ex_condomino)&select=name,email,email2`,tok);
     const condo = (await GET("condominii",`id=eq.${condId}&select=nome`,tok))?.[0];
     for(const u of users||[]){
       const emails=[u.email,u.email2].filter(e=>isRealEmail(e));
@@ -104,7 +104,7 @@ async function notifyCondoDoc(condId, docName, cat, tok) {
           <p style="background:#f1f5f9;padding:12px;border-radius:8px">📄 <strong>${docName}</strong></p>
           ${mailFooter}</div>`);
     }
-    try{ const ids=(await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&select=id`,tok)||[]).map(u=>u.id); await sendPush(ids,(condo?.nome||"Portale")+" \u2014 nuovo documento","\uD83D\uDCC4 "+docName,"/"); }catch(_){}
+    try{ const ids=(await GET("profiles",`cond_id=eq.${condId}&role=eq.condomino&or=(stato.is.null,stato.neq.ex_condomino)&select=id`,tok)||[]).map(u=>u.id); await sendPush(ids,(condo?.nome||"Portale")+" \u2014 nuovo documento","\uD83D\uDCC4 "+docName,"/"); }catch(_){}
   }catch(e){console.error("Notifica errore:",e);}
 }
 async function notifyPersonalDoc(userId, docName, cat, tok) {
@@ -1193,6 +1193,127 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
 }
 
 const nomeCognome = u => { const cg=(u&&u.cognome||"").trim(), nm=(u&&u.nome||"").trim(); return (cg||nm) ? (cg+" "+nm).trim() : ((u&&u.name)||""); };
+function SubentroModal({vecchio,tok,onClose,onDone}){
+  const inp="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200";
+  const [dati,setDati]=useState(null); const [sel,setSel]=useState({});
+  const [f,setF]=useState({cognome:"",nome:"",email:"",telefono:"",cell:"",cod_anagrafica:""});
+  const [err,setErr]=useState(""); const [busy,setBusy]=useState(false); const [fatto,setFatto]=useState(null);
+  const load=useCallback(async()=>{
+    setErr("");
+    try{
+      const rd=await GET("rate_condominio","cond_id=eq."+vecchio.cond_id+"&select=id,numero_rata,data_scadenza,descrizione&order=data_scadenza",tok)||[];
+      const ri=rd.length?await GET("rate_condomino","user_id=eq."+vecchio.id+"&rata_id=in.("+rd.map(r=>r.id).join(",")+")&select=id,rata_id,importo,stato_manuale,notificato",tok)||[]:[];
+      const pg=await GET("pagamenti","user_id=eq."+vecchio.id+"&select=*&order=data_pagamento.desc",tok)||[];
+      const rate=rd.map(r=>{const i=ri.find(x=>x.rata_id===r.id); return {key:r.id,rcId:i?.id||null,importo:i?.importo,stato_manuale:i?.stato_manuale||null};}).filter(r=>r.rcId);
+      const {stati}=calcolaStatoRate(rate,pg);
+      const init={}; rate.forEach(r=>{ init[r.key]=(stati[r.key]?.stato!=="pagata"); });
+      setSel(init); setDati({rd,ri,pg});
+    }catch(e){ setErr(e.message); }
+  },[vecchio.id,vecchio.cond_id,tok]);
+  useEffect(()=>{load();},[load]);
+
+  const rate=(dati?.rd||[]).map(r=>{const i=(dati?.ri||[]).find(x=>x.rata_id===r.id); return {...r,key:r.id,importo:i?.importo,stato_manuale:i?.stato_manuale||null,rcId:i?.id||null};}).filter(r=>r.rcId);
+  const {stati}=calcolaStatoRate(rate,dati?.pg||[]);
+  const nSel=rate.filter(r=>sel[r.key]).length;
+  const totSel=rate.filter(r=>sel[r.key]).reduce((s,r)=>s+(Number(r.importo)||0),0);
+  const toggle=k=>setSel(s=>({...s,[k]:!s[k]}));
+  const vecchioNome=vecchio.name||nomeCognome(vecchio);
+
+  const conferma=async()=>{
+    if(!f.cognome.trim()){ setErr("Inserisci almeno il cognome del nuovo proprietario."); return; }
+    if(!window.confirm("Confermi il subentro sull'unità int. "+(vecchio.interno||"—")+"?\n\n• Nuovo proprietario: "+f.cognome+" "+f.nome+"\n• Rate spostate sul nuovo: "+nSel+" ("+fmtEur(totSel)+")\n• "+vecchioNome+" diventa ex-condomino (congelato, niente più notifiche)")) return;
+    setBusy(true); setErr("");
+    try{
+      const pwd="Mazzini"+Math.floor(1000+Math.random()*9000);
+      let uid; let existingAuthId=null;
+      try{ const res=await createAuthUser(f.email||null,pwd); uid=res.id; }
+      catch(authErr){
+        try{ const authRes=await sb("/auth/v1/admin/users?email="+encodeURIComponent(f.email||""),{svc:true}); const authData=await authRes.json(); existingAuthId=authData?.users?.[0]?.id; }catch(e){}
+        if(!existingAuthId){ const existing=await GET("profiles","email=eq."+encodeURIComponent(f.email||"")+"&select=id,auth_user_id&order=created_at",tok); existingAuthId=(existing||[]).find(p=>p.auth_user_id&&p.auth_user_id!==p.id)?.auth_user_id||existing?.[0]?.auth_user_id||existing?.[0]?.id; }
+        if(!existingAuthId) throw authErr;
+        const fakeEmail=f.cognome.toLowerCase().replace(/[^a-z]/g,".")+"."+Date.now()+"@noemail.local";
+        const res2=await createAuthUser(fakeEmail,pwd); uid=res2.id;
+      }
+      const nome=(f.cognome.trim()+" "+f.nome.trim()).trim();
+      await POST("profiles",{id:uid,auth_user_id:existingAuthId||uid,name:nome,role:"condomino",stato:"attivo",cond_id:Number(vecchio.cond_id),scala:vecchio.scala||null,interno:vecchio.interno||null,email:isRealEmail(f.email)?f.email:null,telefono:f.telefono||null,cell:f.cell||null,nome:f.nome||null,cognome:f.cognome||null,cod_anagrafica:f.cod_anagrafica||null,tipo:vecchio.tipo||null},tok);
+      const daSpostare=rate.filter(r=>sel[r.key]&&r.rcId);
+      for(const r of daSpostare){ await PATCH("rate_condomino","id=eq."+r.rcId,{user_id:uid,notificato:false},tok); }
+      await PATCH("profiles","id=eq."+vecchio.id,{stato:"ex_condomino"},tok);
+      setFatto({nome,pwd,email:isRealEmail(f.email)?f.email:null,spostate:daSpostare.length});
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={busy?undefined:onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{maxHeight:"90vh"}} onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div><h3 className="font-bold text-gray-800">🔄 Subentro proprietario</h3><p className="text-xs text-gray-400">Unità int. {vecchio.interno||"—"} · {vecchio.condominii?.nome||""} · esce: {vecchioNome}</p></div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 text-xl">×</button>
+        </div>
+        <div className="px-6 py-5 overflow-y-auto">
+          <ErrBox msg={err}/>
+          {fatto?(
+            <div className="text-center py-6">
+              <div className="text-5xl mb-3">✅</div>
+              <p className="font-bold text-gray-800 mb-1">Subentro completato</p>
+              <p className="text-sm text-gray-500 mb-4">Nuovo proprietario <strong>{fatto.nome}</strong> creato · {fatto.spostate} rate spostate · il vecchio proprietario è stato congelato (ex-condomino).</p>
+              <div className="bg-gray-50 rounded-xl p-4 text-left text-sm inline-block">
+                <p className="text-gray-400 text-xs mb-1">Credenziali del nuovo utente</p>
+                <p><strong>Login:</strong> {fatto.email||"— (nessuna email)"}</p>
+                <p><strong>Password provvisoria:</strong> <code className="bg-white px-2 py-0.5 rounded border">{fatto.pwd}</code></p>
+              </div>
+              <div className="mt-5"><Btn onClick={onDone}>Chiudi</Btn></div>
+            </div>
+          ):!dati?<Spinner/>:(
+            <>
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-5">
+                <p className="font-semibold text-gray-800 mb-3 text-sm">Nuovo proprietario</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <input className={inp} placeholder="Cognome *" value={f.cognome} onChange={e=>setF({...f,cognome:e.target.value})}/>
+                  <input className={inp} placeholder="Nome" value={f.nome} onChange={e=>setF({...f,nome:e.target.value})}/>
+                  <input className={inp} placeholder="Email (login)" value={f.email} onChange={e=>setF({...f,email:e.target.value})}/>
+                  <input className={inp} placeholder="Cod. anagrafica" value={f.cod_anagrafica} onChange={e=>setF({...f,cod_anagrafica:e.target.value})}/>
+                  <input className={inp} placeholder="Telefono" value={f.telefono} onChange={e=>setF({...f,telefono:e.target.value})}/>
+                  <input className={inp} placeholder="Cellulare" value={f.cell} onChange={e=>setF({...f,cell:e.target.value})}/>
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Unità, scala e condominio sono ereditati dal proprietario uscente.</p>
+              </div>
+              <p className="font-semibold text-gray-800 mb-1 text-sm">Rate da spostare sul nuovo proprietario</p>
+              <p className="text-xs text-gray-400 mb-3">Le rate <strong>non pagate</strong> sono già selezionate (passano al nuovo). Le <strong>pagate</strong> restano al vecchio. Puoi modificare le spunte.</p>
+              {!rate.length?<p className="text-sm text-gray-400 italic">Nessuna rata assegnata a questo proprietario.</p>:(
+                <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  {rate.map(r=>{
+                    const st=stati[r.key]?.stato; const lbl={pagata:"Pagata",parziale:"Parziale",da_pagare:"Da pagare",nd:"n.d."}[st]||st;
+                    const col={pagata:"text-green-600 bg-green-50",parziale:"text-amber-600 bg-amber-50",da_pagare:"text-red-600 bg-red-50",nd:"text-gray-500 bg-gray-100"}[st]||"text-gray-500 bg-gray-100";
+                    return (
+                      <label key={r.key} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50">
+                        <input type="checkbox" checked={!!sel[r.key]} onChange={()=>toggle(r.key)} className="w-4 h-4"/>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800">Rata {r.numero_rata||"—"} · scad. {fmtData(r.data_scadenza)}</p>
+                          {r.descrizione&&<p className="text-xs text-gray-400 truncate">{r.descrizione}</p>}
+                        </div>
+                        <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">{fmtEur(Number(r.importo)||0)}</span>
+                        <span className={"text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap "+col}>{lbl}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="mt-4 text-sm text-gray-500">In spostamento: <strong>{nSel}</strong> rate · <strong>{fmtEur(totSel)}</strong></div>
+            </>
+          )}
+        </div>
+        {!fatto&&dati&&(
+          <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
+            <Btn variant="secondary" onClick={onClose} disabled={busy}>Annulla</Btn>
+            <Btn onClick={conferma} disabled={busy}>{busy?"Elaboro…":"Conferma subentro"}</Btn>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function AdminUtenti({tok}) {
   const {data:condominii}=useData(()=>GET("condominii","select=id,nome,citta,iban,istituto,intestazione&order=nome",tok),[tok]);
   const [users,setUsers]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
@@ -1211,7 +1332,7 @@ function AdminUtenti({tok}) {
   },[tok,search,filterCond,filtroRuolo,page]);
   useEffect(()=>{load();},[load]);
   useEffect(()=>setPage(0),[search,filterCond,filtroRuolo]);
-  const [riepRate,setRiepRate]=useState({}); const [rateModal,setRateModal]=useState(null);
+  const [riepRate,setRiepRate]=useState({}); const [rateModal,setRateModal]=useState(null); const [subentroModal,setSubentroModal]=useState(null);
   useEffect(()=>{ (async()=>{
     if(!users.length){ setRiepRate({}); return; }
     try{
@@ -1309,6 +1430,7 @@ function AdminUtenti({tok}) {
             <div className="flex gap-2">
               <Btn variant="secondary" onClick={()=>setRateModal(u)}>💶 Rate</Btn>
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
+              {u.stato==="attivo"&&<Btn variant="secondary" onClick={()=>setSubentroModal(u)}>🔄 Subentro</Btn>}
               {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeExCondomino(u.id)}>Ex-Condomino</Btn>}
               {(u.stato==="ex_condomino"||u.stato==="disattivato")&&<Btn variant="success" onClick={()=>reattiva(u.id)}>Riattiva</Btn>}
               <Btn variant="danger" onClick={()=>remove(u.id)}>Elimina</Btn>
@@ -1325,6 +1447,7 @@ function AdminUtenti({tok}) {
       </div>
       {modal&&<UtenteModal mode={modal.mode} data={modal.data} condominii={condominii||[]} onSave={save} onClose={()=>setModal(null)}/>}
       {rateModal&&<RatePagamentiModal utente={rateModal} tok={tok} onClose={()=>{setRateModal(null); load();}}/>}
+      {subentroModal&&<SubentroModal vecchio={subentroModal} tok={tok} onClose={()=>setSubentroModal(null)} onDone={()=>{setSubentroModal(null); load();}}/>}
     </div>
   );
 }
@@ -2437,7 +2560,7 @@ function AvvisoModal({condominii,selCond,tok,onClose}) {
       const storagePath="avvisi/"+cond+"/"+Date.now()+"."+ext;
       await uploadFile("avvisi",storagePath,file,tok);
       await POST("avvisi",{titolo,tipo,solo_proprietari:soloProprietari,cond_id:Number(cond),storage_path:storagePath,nome_file:file.name},tok);
-      try{ const q="cond_id=eq."+cond+(soloProprietari?"&role=eq.condomino":"&role=in.(condomino,inquilino)")+"&select=id"; const ids=(await GET("profiles",q,tok)||[]).map(u=>u.id); await sendPush(ids,"Nuovo avviso","\uD83D\uDCE2 "+titolo,"/"); }catch(_){}
+      try{ const q="cond_id=eq."+cond+(soloProprietari?"&role=eq.condomino":"&role=in.(condomino,inquilino)")+"&or=(stato.is.null,stato.neq.ex_condomino)&select=id"; const ids=(await GET("profiles",q,tok)||[]).map(u=>u.id); await sendPush(ids,"Nuovo avviso","\uD83D\uDCE2 "+titolo,"/"); }catch(_){}
       onClose();
     }catch(e){alert(e.message);}
     setSaving(false);
