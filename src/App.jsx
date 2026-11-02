@@ -723,6 +723,7 @@ function AdminPagamenti({tok}) {
       const body=daReg.map(r=>({user_id:r.userId,cond_id:r.condId,data_pagamento:r.data,importo:r.importo,nominativo:r.nome,origine:"import_pdf",chiave_import:r.chiave}));
       const ins=await sb("/rest/v1/pagamenti?on_conflict=chiave_import",{method:"POST",body,prefer:"return=representation,resolution=ignore-duplicates",token:tok});
       const n=Array.isArray(ins)?ins.length:0;
+      try{ const cids=[...new Set(daReg.map(r=>r.condId))].filter(Boolean); if(cids.length) await PATCH("condominii","id=in.("+cids.join(",")+")",{ultimo_import_pagamenti:new Date().toISOString()},tok); }catch(e){ console.warn("Aggiorno data import:",e.message); }
       setEsito({inseriti:n,doppi:daReg.length-n,nonReg:righe.length-daReg.length}); setRighe([]);
     }catch(e){ setErr(e.message); }
     setSaving(false);
@@ -3104,12 +3105,13 @@ function CondBanca({user}) {
 function CondRate({user}) {
   const SBU = import.meta.env.VITE_SUPABASE_URL;
   const SBK = import.meta.env.VITE_SUPABASE_KEY;
-  const [righe,setRighe]=useState([]); const [loading,setLoading]=useState(true);
+  const [righe,setRighe]=useState([]); const [loading,setLoading]=useState(true); const [ultimoAgg,setUltimoAgg]=useState(null);
 
   useEffect(()=>{
     (async()=>{
       setLoading(true);
       try{
+        try{ const rc=await fetch(SBU+"/rest/v1/condominii?select=ultimo_import_pagamenti&id=eq."+user.cond_id,{headers:{apikey:SBK,Authorization:"Bearer "+user.token}}); const jc=await rc.json(); if(Array.isArray(jc)&&jc[0]) setUltimoAgg(jc[0].ultimo_import_pagamenti); }catch(e){}
         // 1. Carica definizioni rate per questo stabile
         const r1=await fetch(SBU+"/rest/v1/rate_condominio?select=id,numero_rata,data_scadenza,descrizione&cond_id=eq."+user.cond_id+"&order=data_scadenza",
           {headers:{apikey:SBK,Authorization:"Bearer "+user.token}});
@@ -3178,7 +3180,8 @@ function CondRate({user}) {
   return (
     <div>
       <h2 className="text-2xl font-black text-gray-800 mb-2">Le mie rate</h2>
-      <p className="text-gray-400 text-sm mb-5">Piano rate del tuo condominio con gli importi a tuo carico.</p>
+      <p className="text-gray-400 text-sm mb-3">Piano rate del tuo condominio con gli importi a tuo carico.</p>
+      {ultimoAgg&&<div className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 text-xs font-semibold px-3 py-1.5 rounded-full mb-5">🔄 Registrazione pagamenti aggiornata al {new Date(ultimoAgg).toLocaleDateString("it-IT")} alle {new Date(ultimoAgg).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})}</div>}
       {loading?<Spinner/>:!righe.length?<div className="bg-white rounded-2xl border border-gray-100 shadow-sm"><EmptyState icon="📅" text="Nessuna rata configurata per il tuo condominio."/></div>
       :(
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
