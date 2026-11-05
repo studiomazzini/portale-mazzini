@@ -1741,6 +1741,28 @@ function AdminImportInquilini({tok}) {
       if(!byKey[k2]) byKey[k2]=p;
     });
     const creati=[],aggiornati=[],noEmail=[],failed=[];
+    // Collegamento inquilino -> scheda del/i proprietario/i della stessa unita (vista lato proprietario)
+    let propsByInt={}; const inqLinkSeen=new Set();
+    try{
+      const props=await GET("profiles","cond_id=eq."+selCond+"&role=eq.condomino&or=(stato.is.null,stato.neq.ex_condomino)&select=id,interno",tok)||[];
+      props.forEach(p=>{ const k=normInt(p.interno); (propsByInt[k]=propsByInt[k]||[]).push(p.id); });
+      const propIds=props.map(p=>p.id);
+      if(propIds.length){
+        const exRows=await GET("inquilini","user_id=in.("+propIds.join(",")+")&select=user_id,nome",tok)||[];
+        exRows.forEach(x=>inqLinkSeen.add(x.user_id+"|"+normNm(x.nome||"")));
+      }
+    }catch(e){ console.warn("Prefetch proprietari per link inquilini:",e.message); }
+    const ensureInqLink=async(r)=>{
+      const list=propsByInt[normInt(r.interno)]||[];
+      for(const propId of list){
+        const key=propId+"|"+r.chiaveNome;
+        if(inqLinkSeen.has(key)) continue;
+        inqLinkSeen.add(key);
+        const email=isRealEmail(r.email)?r.email:(isRealEmail(r.email2)?r.email2:null);
+        const tel=r.telefono||r.cell||null;
+        await POST("inquilini",{user_id:propId,nome:r.nomeCompleto,email,tel},tok);
+      }
+    };
     for(let i=0;i<rows.length;i++){
       const r=rows[i]; setProgress(Math.round(((i+1)/rows.length)*100));
       const anag={
@@ -1758,6 +1780,7 @@ function AdminImportInquilini({tok}) {
         if(ex){
           await PATCH("profiles","id=eq."+ex.id,anag,tok);
           aggiornati.push(r);
+          try{ await ensureInqLink(r); }catch(_e){ console.warn("Collego inquilino:",_e.message); }
         } else {
           let uid, authId=null;
           try{ const res=await createAuthUser(r.email||null,r.password); uid=res.id; }
@@ -1770,6 +1793,7 @@ function AdminImportInquilini({tok}) {
           }
           await POST("profiles",{id:uid,auth_user_id:authId||uid,role:"inquilino",cond_id:Number(selCond),
             email:isRealEmail(r.email)?r.email:null, ...anag},tok);
+          try{ await ensureInqLink(r); }catch(_e){ console.warn("Collego inquilino:",_e.message); }
           if(isRealEmail(r.email)){
             try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); creati.push(r); }
             catch{ noEmail.push(r); }
