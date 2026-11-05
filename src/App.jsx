@@ -1464,6 +1464,7 @@ function AdminImport({tok}) {
   useEffect(()=>{ if(condominii?.length&&!selCond) setSelCond(String(condominii[0].id)); },[condominii]);
 
   const normInt = s => String(s??"").toUpperCase().replace(/\s+/g,"").replace(/^0+(?=\d)/,"").trim();
+  const normNmP = s => String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/\bINQ\.?\b/g,"").replace(/[^A-Z0-9]+/g," ").trim();
 
   const parseExcel=async xfile=>{
     setErr(""); setRows([]); setPreview(false); setResults(null);
@@ -1516,7 +1517,7 @@ function AdminImport({tok}) {
         const primo=(cognome||nomeCompleto).split(/\s+/)[0]||"Utente";
         const pw=primo.charAt(0).toUpperCase()+primo.slice(1,4).toLowerCase()+mese+"!";
         const p={
-          unita, interno:unita, cod:val(row,ci.cod), cognome, nome, nomeCompleto,
+          unita, interno:unita, cod:val(row,ci.cod), cognome, nome, nomeCompleto, chiaveNome:normNmP(nomeCompleto),
           presso:val(row,ci.presso), via:val(row,ci.via), cap:val(row,ci.cap),
           localita:val(row,ci.citta), prov:val(row,ci.prov), cf:val(row,ci.cf),
           telefono:val(row,ci.tel1), tel2:val(row,ci.tel2),
@@ -1536,8 +1537,19 @@ function AdminImport({tok}) {
     setImporting(true); setErr(""); setProgress(0);
     const condo=condominii?.find(c=>String(c.id)===String(selCond));
     let existing=[];
-    try{ existing=await GET("profiles","cond_id=eq."+selCond+"&role=neq.inquilino&select=id,interno,role,cod_anagrafica",tok)||[]; }catch(e){}
-    const byInt={}; existing.forEach(p=>{ const k=normInt(p.interno); if(k&&!byInt[k]) byInt[k]=p; });
+    try{ existing=await GET("profiles","cond_id=eq."+selCond+"&role=neq.inquilino&select=id,interno,role,cod_anagrafica,name,email",tok)||[]; }catch(e){}
+    const byInt={}, byCod={}, byName={};
+    existing.forEach(p=>{
+      const k=normInt(p.interno); if(k&&!byInt[k]) byInt[k]=p;
+      if(p.cod_anagrafica&&!byCod[String(p.cod_anagrafica)]) byCod[String(p.cod_anagrafica)]=p;
+      const nk=normNmP(p.name||""); if(nk&&!byName[nk]) byName[nk]=p;
+    });
+    const trovaEsistente=r=>(r.cod&&byCod[String(r.cod)])||byInt[normInt(r.interno)]||(r.chiaveNome&&byName[r.chiaveNome])||null;
+    // Riepilogo di sicurezza prima di procedere
+    const nAgg=rows.filter(r=>trovaEsistente(r)).length, nNew=rows.length-nAgg;
+    if(existing.length && nNew>0){
+      if(!window.confirm("Aggiornamento anagrafica — "+(condo?.nome||"")+"\n\n• Utenti riconosciuti e aggiornati: "+nAgg+"\n• Nuovi utenti da creare: "+nNew+"\n\nSe ti aspettavi solo aggiornamenti e vedi molti \"nuovi\", ANNULLA: l'abbinamento non ha funzionato e rischi di duplicare gli utenti.\n\nProcedere?")){ setImporting(false); return; }
+    }
     const creati=[],aggiornati=[],noEmail=[],failed=[];
     for(let i=0;i<rows.length;i++){
       const r=rows[i]; setProgress(Math.round(((i+1)/rows.length)*100));
@@ -1552,7 +1564,7 @@ function AdminImport({tok}) {
         codice_fiscale:r.cf||null, data_nascita:r.dataNasc||null,
       };
       try{
-        const ex=byInt[normInt(r.interno)];
+        const ex=trovaEsistente(r);
         if(ex){
           // Aggiornamento in luogo: non tocco email di login né auth
           await PATCH("profiles","id=eq."+ex.id,anag,tok);
@@ -1569,7 +1581,7 @@ function AdminImport({tok}) {
           }
           await POST("profiles",{id:uid,auth_user_id:authId||uid,role:"condomino",cond_id:Number(selCond),
             email:isRealEmail(r.email)?r.email:null, ...anag},tok);
-          if(isRealEmail(r.email)){
+          if(isRealEmail(r.email) && !authId){
             try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); creati.push(r); }
             catch{ noEmail.push(r); }
           } else noEmail.push(r);
