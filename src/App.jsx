@@ -1185,6 +1185,7 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
         {condominii?.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
       </Sel>
       <div className="flex gap-3"><div className="flex-1"><Inp label="Civico/Scala" value={f.scala||""} onChange={e=>s("scala",e.target.value)}/></div><div className="flex-1"><Inp label="Interno" value={f.interno||""} onChange={e=>s("interno",e.target.value)}/></div></div>
+      <Inp label="Cod. anagrafica (YStabili)" value={f.cod_anagrafica||""} onChange={e=>s("cod_anagrafica",e.target.value)} hint="Codice anagrafica di YStabili. Modificalo per allineare un condomino presente con due codici diversi."/>
       <div className="flex gap-3"><div className="flex-1"><Inp label="Via" value={f.via||""} onChange={e=>s("via",e.target.value)}/></div><div style={{width:"30%"}}><Inp label="CAP" value={f.cap||""} onChange={e=>s("cap",e.target.value)}/></div></div>
       <div className="flex gap-3"><div className="flex-1"><Inp label="Località" value={f.localita||""} onChange={e=>s("localita",e.target.value)}/></div><div style={{width:"20%"}}><Inp label="Prov." value={f.prov||""} onChange={e=>s("prov",e.target.value)}/></div></div>
       <div className="flex gap-3"><div className="flex-1"><Inp label="Tel. 1" value={f.telefono||""} onChange={e=>s("telefono",e.target.value)}/></div><div className="flex-1"><Inp label="Tel. 2" value={f.telefono2||""} onChange={e=>s("telefono2",e.target.value)}/></div></div>
@@ -1381,7 +1382,7 @@ function AdminUtenti({tok}) {
           uid=res2.id;
           // Sovrascrivi auth_user_id con quello dell'utente principale
         }
-        await POST("profiles",{id:uid,auth_user_id:existingAuthId||uid,name:f.name,role:f.role||"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:isRealEmail(f.email)?f.email:null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
+        await POST("profiles",{id:uid,auth_user_id:existingAuthId||uid,name:f.name,role:f.role||"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,cod_anagrafica:f.cod_anagrafica||null,email:isRealEmail(f.email)?f.email:null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
       }else{
         // Aggiorna email di login su Supabase se cambiata
         const utentePre=users.find(u=>u.id===f.id);
@@ -1390,7 +1391,7 @@ function AdminUtenti({tok}) {
             await sb("/auth/v1/admin/users/"+f.id,{method:"PUT",svc:true,body:{email:f.email,email_confirm:true}});
           }catch(emailErr){if(emailErr.message.includes("duplicate")){alert("Attenzione: l'email inserita è già in uso da un altro account. Il profilo è stato salvato ma l'email di login non è stata aggiornata.");}else{console.warn("Impossibile aggiornare email login:",emailErr.message);}}
         }
-        await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,role:f.role||"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,email:f.email||null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
+        await PATCH("profiles",`id=eq.${f.id}`,{name:f.name,role:f.role||"condomino",cond_id:Number(f.cond_id),scala:f.scala,interno:f.interno,cod_anagrafica:f.cod_anagrafica||null,email:f.email||null,email2:f.email2||null,telefono:f.telefono||null,telefono2:f.telefono2||null,cell:f.cell||null,cell2:f.cell2||null,nome:f.nome||null,cognome:f.cognome||null,titolo:f.titolo||null,presso:f.presso||null,via:f.via||null,localita:f.localita||null,prov:f.prov||null,cap:f.cap||null,num:f.num||null,tipo:f.tipo||null},tok);
       }
       setModal(null); load();
     }catch(e){alert(e.message);}
