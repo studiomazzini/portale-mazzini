@@ -1202,7 +1202,8 @@ function CollegaModal({utente,tok,onClose,onDone}){
     setErr("");
     try{
       const t=q.trim(); if(t.length<2){ setRes([]); return; }
-      const r=await GET("profiles","name=ilike.*"+encodeURIComponent(t)+"*&role=neq.admin&id=neq."+utente.id+"&select=id,name,email,auth_user_id,cod_anagrafica,condominii(nome)&limit=20",tok)||[];
+      const pat="*"+encodeURIComponent(t)+"*";
+      const r=await GET("profiles","or=(name.ilike."+pat+",cognome.ilike."+pat+",nome.ilike."+pat+")&role=neq.admin&id=neq."+utente.id+"&select=id,name,cognome,nome,email,auth_user_id,cod_anagrafica,condominii(nome)&limit=20",tok)||[];
       setRes(r);
     }catch(e){ setErr(e.message); }
   };
@@ -1227,7 +1228,7 @@ function CollegaModal({utente,tok,onClose,onDone}){
       <div style={{maxHeight:"18rem",overflowY:"auto"}}>
         {res.map(r=>(
           <div key={r.id} className="flex items-center justify-between p-2 border-b border-gray-50">
-            <div><p className="text-sm font-semibold text-gray-800">{r.name}</p><p className="text-xs text-gray-400">{r.condominii?.nome} · {r.email||"senza email"} · cod {r.cod_anagrafica||"—"}</p></div>
+            <div><p className="text-sm font-semibold text-gray-800">{nomeCognome(r)}</p><p className="text-xs text-gray-400">{r.condominii?.nome} · {r.email||"senza email"} · cod {r.cod_anagrafica||"—"}</p></div>
             <Btn variant="secondary" onClick={()=>collega(r)} disabled={busy}>Collega qui</Btn>
           </div>
         ))}
