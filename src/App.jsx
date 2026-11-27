@@ -1196,6 +1196,47 @@ function UtenteModal({mode,data,condominii,onSave,onClose}) {
 }
 
 const nomeCognome = u => { const cg=(u&&u.cognome||"").trim(), nm=(u&&u.nome||"").trim(); return (cg||nm) ? (cg+" "+nm).trim() : ((u&&u.name)||""); };
+function CollegaModal({utente,tok,onClose,onDone}){
+  const [q,setQ]=useState(""); const [res,setRes]=useState([]); const [busy,setBusy]=useState(false); const [err,setErr]=useState("");
+  const cerca=async()=>{
+    setErr("");
+    try{
+      const t=q.trim(); if(t.length<2){ setRes([]); return; }
+      const r=await GET("profiles","name=ilike.*"+encodeURIComponent(t)+"*&role=neq.admin&id=neq."+utente.id+"&select=id,name,email,auth_user_id,cod_anagrafica,condominii(nome)&limit=20",tok)||[];
+      setRes(r);
+    }catch(e){ setErr(e.message); }
+  };
+  const collega=async(target)=>{
+    const loginId=target.auth_user_id||target.id;
+    if(!window.confirm("Collegare "+(utente.name||"questo profilo")+" all'accesso di "+(target.name||"")+"? Da ora sarà visibile sotto lo stesso login. Nessun dato viene cancellato.")) return;
+    setBusy(true); setErr("");
+    try{
+      await PATCH("profiles","id=eq."+utente.id,{auth_user_id:loginId},tok);
+      alert("Collegato: "+(utente.name||"")+" ora appare sotto l'accesso di "+(target.name||"")+".");
+      onDone&&onDone();
+    }catch(e){ setErr(e.message); setBusy(false); }
+  };
+  return (
+    <Modal title="Collega a un altro utente" onClose={busy?undefined:onClose}>
+      <p className="text-sm text-gray-500 mb-3">Collega <b>{utente.name}</b> all'accesso (login) di un altro utente. Utile quando la stessa persona è stata creata due volte con codici anagrafica diversi: così accede una volta sola e vede entrambi i profili.</p>
+      <ErrBox msg={err}/>
+      <div className="flex gap-2 mb-3">
+        <input className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="Cerca per nome..." value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&cerca()}/>
+        <Btn variant="secondary" onClick={cerca}>Cerca</Btn>
+      </div>
+      <div style={{maxHeight:"18rem",overflowY:"auto"}}>
+        {res.map(r=>(
+          <div key={r.id} className="flex items-center justify-between p-2 border-b border-gray-50">
+            <div><p className="text-sm font-semibold text-gray-800">{r.name}</p><p className="text-xs text-gray-400">{r.condominii?.nome} · {r.email||"senza email"} · cod {r.cod_anagrafica||"—"}</p></div>
+            <Btn variant="secondary" onClick={()=>collega(r)} disabled={busy}>Collega qui</Btn>
+          </div>
+        ))}
+        {(!res.length&&q.trim().length>=2)&&<p className="text-sm text-gray-400 p-2">Nessun risultato.</p>}
+      </div>
+    </Modal>
+  );
+}
+
 function SubentroModal({vecchio,tok,onClose,onDone}){
   const inp="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200";
   const [dati,setDati]=useState(null); const [sel,setSel]=useState({});
@@ -1335,7 +1376,7 @@ function AdminUtenti({tok}) {
   },[tok,search,filterCond,filtroRuolo,page]);
   useEffect(()=>{load();},[load]);
   useEffect(()=>setPage(0),[search,filterCond,filtroRuolo]);
-  const [riepRate,setRiepRate]=useState({}); const [rateModal,setRateModal]=useState(null); const [subentroModal,setSubentroModal]=useState(null);
+  const [riepRate,setRiepRate]=useState({}); const [rateModal,setRateModal]=useState(null); const [subentroModal,setSubentroModal]=useState(null); const [collegaModal,setCollegaModal]=useState(null);
   useEffect(()=>{ (async()=>{
     if(!users.length){ setRiepRate({}); return; }
     try{
@@ -1450,6 +1491,7 @@ function AdminUtenti({tok}) {
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
               {isRealEmail(u.email)&&<Btn variant="secondary" onClick={()=>inviaAccesso(u)}>✉️ Invia accesso</Btn>}
               {u.stato==="attivo"&&<Btn variant="secondary" onClick={()=>setSubentroModal(u)}>🔄 Subentro</Btn>}
+              <Btn variant="secondary" onClick={()=>setCollegaModal(u)}>🔗 Collega</Btn>
               {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeExCondomino(u.id)}>Ex-Condomino</Btn>}
               {(u.stato==="ex_condomino"||u.stato==="disattivato")&&<Btn variant="success" onClick={()=>reattiva(u.id)}>Riattiva</Btn>}
               <Btn variant="danger" onClick={()=>remove(u.id)}>Elimina</Btn>
@@ -1467,6 +1509,7 @@ function AdminUtenti({tok}) {
       {modal&&<UtenteModal mode={modal.mode} data={modal.data} condominii={condominii||[]} onSave={save} onClose={()=>setModal(null)}/>}
       {rateModal&&<RatePagamentiModal utente={rateModal} tok={tok} onClose={()=>{setRateModal(null); load();}}/>}
       {subentroModal&&<SubentroModal vecchio={subentroModal} tok={tok} onClose={()=>setSubentroModal(null)} onDone={()=>{setSubentroModal(null); load();}}/>}
+      {collegaModal&&<CollegaModal utente={collegaModal} tok={tok} onClose={()=>setCollegaModal(null)} onDone={()=>{setCollegaModal(null); load();}}/>}
     </div>
   );
 }
