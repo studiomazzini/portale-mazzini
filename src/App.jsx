@@ -54,6 +54,7 @@ async function getSignedUrl(bucket, filePath, token) {
 
 // ── Email ─────────────────────────────────────────────────────────────────────
 const MAIL_FROM = "Portale Condominiale <portale@studiomazzinibo.com>";
+const RESET_URL = "https://studiomazzinibo.com/imposta-password.html";
 const sendEmail = async(to, subject, html, attachments) => {
   const r = await fetch("/.netlify/functions/send-email", {
     method: "POST",
@@ -1404,6 +1405,21 @@ function AdminUtenti({tok}) {
   };
   const makeExCondomino=async id=>{ if(!window.confirm("Impostare come ex-condomino? L'utente non potrà più accedere alle funzioni complete.")) return; try{await PATCH("profiles",`id=eq.${id}`,{stato:"ex_condomino"},tok); load();}catch(e){alert(e.message);} };
   const reattiva=async id=>{ if(!window.confirm("Riattivare questo utente?")) return; try{await PATCH("profiles",`id=eq.${id}`,{stato:"attivo"},tok); load();}catch(e){alert(e.message);} };
+  const inviaAccesso=async u=>{
+    if(!isRealEmail(u.email)){ alert("Aggiungi prima un'email reale a questo utente (Modifica), poi invia l'accesso."); return; }
+    if(!window.confirm(`Inviare l'accesso a ${u.name} (${u.email})?\nRiceverà un'email per impostare la password e accedere.`)) return;
+    try{
+      const authId=u.auth_user_id||u.id;
+      try{ await sb("/auth/v1/admin/users/"+authId,{method:"PUT",svc:true,body:{email:u.email,email_confirm:true}}); }catch(e){ if(!/duplicate|already|registered/i.test(e.message)) throw e; }
+      const link=await sb("/auth/v1/admin/generate_link",{method:"POST",svc:true,body:{type:"recovery",email:u.email,redirect_to:RESET_URL}});
+      const actionLink=link.action_link||link.properties?.action_link;
+      if(!actionLink) throw new Error("Link di accesso non generato");
+      const html=`<div style="font-family:system-ui,sans-serif;max-width:480px;margin:auto"><h2 style="color:#1f4e79">Accesso al portale condomini</h2><p>Gentile ${u.name||"condomino"},</p><p>lo Studio Mazzini le ha attivato l'accesso al portale. Per impostare la password e accedere:</p><p style="text-align:center;margin:28px 0"><a href="${actionLink}" style="background:#1f4e79;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Imposta la password</a></p><p style="font-size:12px;color:#8a95a1">Se il pulsante non funziona, copi questo indirizzo:<br>${actionLink}</p><p style="font-size:12px;color:#8a95a1">Studio Amministrazioni Immobiliari Mazzini</p></div>`;
+      await sendEmail([u.email],"Accesso al portale condomini — Studio Mazzini",html);
+      await PATCH("profiles",`id=eq.${u.id}`,{stato:"attivo"},tok);
+      alert("Accesso inviato a "+u.email);
+    }catch(e){ alert("Errore invio accesso: "+e.message); }
+  };
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -1431,6 +1447,7 @@ function AdminUtenti({tok}) {
             <div className="flex gap-2">
               <Btn variant="secondary" onClick={()=>setRateModal(u)}>💶 Rate</Btn>
               <Btn variant="secondary" onClick={()=>setModal({mode:"edit",data:{...u,cond_id:u.cond_id||""}})}>Modifica</Btn>
+              {isRealEmail(u.email)&&<Btn variant="secondary" onClick={()=>inviaAccesso(u)}>✉️ Invia accesso</Btn>}
               {u.stato==="attivo"&&<Btn variant="secondary" onClick={()=>setSubentroModal(u)}>🔄 Subentro</Btn>}
               {u.stato==="attivo"&&<Btn variant="warning" onClick={()=>makeExCondomino(u.id)}>Ex-Condomino</Btn>}
               {(u.stato==="ex_condomino"||u.stato==="disattivato")&&<Btn variant="success" onClick={()=>reattiva(u.id)}>Riattiva</Btn>}
