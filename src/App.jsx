@@ -1598,10 +1598,8 @@ function AdminImport({tok}) {
           }
           await POST("profiles",{id:uid,auth_user_id:authId||uid,role:"condomino",cond_id:Number(selCond),
             email:isRealEmail(r.email)?r.email:null, ...anag},tok);
-          if(isRealEmail(r.email) && !authId){
-            try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); creati.push(r); }
-            catch{ noEmail.push(r); }
-          } else noEmail.push(r);
+          // Import: nessun invito automatico. Accessi inviati a mano con "Invia accesso".
+          noEmail.push(r);
           await new Promise(res=>setTimeout(res,150));
         }
       }catch(e){ failed.push({...r,errore:e.message}); }
@@ -1823,10 +1821,8 @@ function AdminImportInquilini({tok}) {
           await POST("profiles",{id:uid,auth_user_id:authId||uid,role:"inquilino",cond_id:Number(selCond),
             email:isRealEmail(r.email)?r.email:null, ...anag},tok);
           try{ await ensureInqLink(r); }catch(_e){ console.warn("Collego inquilino:",_e.message); }
-          if(isRealEmail(r.email)){
-            try{ await sendWelcomeEmail(r.email,r.nomeCompleto,r.password,condo?.nome||""); creati.push(r); }
-            catch{ noEmail.push(r); }
-          } else noEmail.push(r);
+          // Import: nessun invito automatico. Accessi inviati a mano con "Invia accesso".
+          noEmail.push(r);
           await new Promise(res=>setTimeout(res,150));
         }
       }catch(e){ failed.push({...r,errore:e.message}); }
